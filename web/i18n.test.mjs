@@ -6,6 +6,7 @@ import vm from "node:vm";
 const appSource = readFileSync(new URL("./app.js", import.meta.url), "utf8");
 const htmlSource = readFileSync(new URL("./index.html", import.meta.url), "utf8");
 const i18nSource = readFileSync(new URL("./i18n.js", import.meta.url), "utf8");
+const koSource = readFileSync(new URL("./ko-locale.js", import.meta.url), "utf8");
 const japaneseLetters = /\p{Script=Hiragana}|\p{Script=Katakana}/u;
 const cjkText = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}/u;
 
@@ -26,7 +27,8 @@ function translator(locale) {
     },
   });
   // Run the browser module with a minimal DOM; retain its initialization and observer.
-  vm.runInContext(i18nSource.replace(/^export /gm, ""), context);
+  vm.runInContext(koSource.replace(/^export /gm, ""), context);
+  vm.runInContext(i18nSource.replace(/^import .*;\\n/gm, "").replace(/^export /gm, ""), context);
   return { context, t: context.t, observe: (node) => observerCallback([{ addedNodes: [node] }]) };
 }
 
@@ -69,7 +71,7 @@ function assertLocalized(t, source, locale) {
   else assert.doesNotMatch(result, locale === "en" ? cjkText : japaneseLetters, source);
 }
 
-for (const locale of ["ja", "en", "zh-Hant"]) {
+for (const locale of ["ja", "en", "zh-Hant", "ko"]) {
   test(`${locale}: static UI text and attributes have translations`, () => {
     const { t } = translator(locale);
     const withoutTemplates = appSource.replace(/`(?:[^`\\]|\\.)*`/g, "");
@@ -140,4 +142,18 @@ test("nested weapon validation localizes the error while preserving a custom nam
   const validation = appSource.match(/^function requireTargetKeepCategories\(target\) \{[\s\S]*?^\}/m)[0];
   vm.runInContext(validation, context);
   assert.throws(() => context.requireTargetKeepCategories({}), { message: "日本語の武器: 弓不可設定銳利度／裝填系。" });
+});
+
+
+test("ko: Korean game terms and dynamic rows preserve engine identifiers", () => {
+  const { t, context } = translator("ko");
+  assert.equal(t("黒蝕竜の力"), "흑식룡의 힘");
+  assert.equal(t("ヌシの魂"), "주인의 혼");
+  assert.equal(t("海竜の渦雷"), "해룡의 와뢰");
+  assert.equal(t("基礎攻撃力強化ＥＸ"), "기초 공격력 강화 EX");
+  assert.equal(t("抽選2の5枠目"), "2회차 5번 슬롯");
+  assert.equal(t("再付与2のシリーズスキル"), "2회차 시리즈 스킬");
+  const missing = vm.runInContext("Object.keys(ALL_TEXT).filter((key) => !Object.hasOwn(KO_TEXT, key))", context);
+  assert.deepEqual([...missing], []);
+  assert.match(htmlSource, /<option value="ko">한국어<\/option>/);
 });
