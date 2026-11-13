@@ -1,6 +1,7 @@
 import { getLocale } from "./i18n.js";
 import { createOcrSequencer, parseOcrResult } from "./ocr-parser.js";
 import { createFrameThrottle } from "./ocr-frame.js";
+import { ocrRenderSize, enhanceOcrImageData, bestOcrCandidate } from "./ocr-image.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1800;
@@ -20,7 +21,8 @@ const TEXT = {
     preprocessLabel: "글자 배경",
     light: "어두운 배경 · 밝은 글자",
     dark: "밝은 배경 · 어두운 글자",
-    original: "전처리 없이 원본 인식",
+    original: "원본 인식",
+    enhanced: "선명하게 보정 (권장)",
     resetArea: "영역 다시 지정",
     retry: "다시 인식",
     pause: "인식 일시정지",
@@ -28,7 +30,7 @@ const TEXT = {
     applyOnce: "인식 결과 한 번 입력",
     selectArea: "미리보기에서 새 결과 텍스트만 드래그해 인식 영역을 지정하세요.",
     recognized: "최근 인식 결과",
-    hint: "비교 화면에서는 기존 옵션을 제외하고 신규 결과만 선택하세요. 5개 옵션(스킬은 2개)을 모두 읽어야 자동 입력합니다. 화면 이미지는 외부 서버로 전송하지 않으며 브라우저 내부에서 처리합니다. 최초 실행 시 OCR 코드와 한국어 모델을 내려받습니다.",
+    hint: "옵션만 포함하도록 인식 영역을 좁게 선택하세요. 선명하게 보정 모드는 글자를 최대 3배 확대하고 대비·윤곽을 조절합니다. 동일 화면은 반복 입력하지 않으며, 외부 서버로 화면을 전송하지 않습니다.",
     reading: "게임 화면 인식 중…",
     loading: "한국어 OCR 모델 불러오는 중… (최초 실행은 오래 걸릴 수 있습니다)",
     partial: "인식된 옵션: ",
@@ -54,6 +56,7 @@ const TEXT = {
     light: "Dark background · light text",
     dark: "Light background · dark text",
     original: "Original image",
+    enhanced: "Enhanced clarity (recommended)",
     resetArea: "Reselect region",
     retry: "Read again",
     pause: "Pause recognition",
@@ -87,6 +90,7 @@ const TEXT = {
     light: "暗い背景・明るい文字",
     dark: "明るい背景・暗い文字",
     original: "画像のまま",
+    enhanced: "鮮明化（推奨）",
     resetArea: "範囲を再選択",
     retry: "もう一度認識",
     pause: "認識を一時停止",
@@ -120,6 +124,7 @@ const TEXT = {
     light: "深色背景·淺色文字",
     dark: "淺色背景·深色文字",
     original: "原始影像",
+    enhanced: "強化清晰度（建議）",
     resetArea: "重新選取區域",
     retry: "重新辨識",
     pause: "暫停辨識",
@@ -346,13 +351,27 @@ export function initializeOcrUi(doc = document) {
     const width = Math.min(video.videoWidth - left, Math.ceil(region.w * video.videoWidth));
     const height = Math.min(video.videoHeight - top, Math.ceil(region.h * video.videoHeight));
     if (width < 25 || height < 15) return null;
-    const scale = Math.max(1, Math.min(2.4, 1900 / width));
-    workCanvas.width = Math.round(width * scale);
-    workCanvas.height = Math.round(height * scale);
+
+    const size = ocrRenderSize(width, height);
+    if (!size) return null;
+    const { padding, renderedWidth, renderedHeight } = size;
+    workCanvas.width = size.width;
+    workCanvas.height = size.height;
+    // White margin prevents Tesseract from chopping off characters near
+    // a tightly selected game region.
+    workContext.fillStyle = "#fff";
+    workContext.fillRect(0, 0, size.width, size.height);
+    workContext.imageSmoothingEnabled = true;
+    workContext.imageSmoothingQuality = "high";
     workContext.drawImage(video, left, top, width, height,
-      0, 0, workCanvas.width, workCanvas.height);
-    if (preprocess !== "original") {
-      const frame = workContext.getImageData(0, 0, workCanvas.width, workCanvas.height);
+      padding, padding, renderedWidth, renderedHeight);
+
+    if (preprocess === "enhanced") {
+      const image = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
+      enhanceOcrImageData(image);
+      workContext.putImageData(image, padding, padding);
+    } else if (preprocess === "light" || preprocess === "dark") {
+      const frame = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
       const data = frame.data;
       const brightLetters = preprocess === "light";
       const histogram = new Uint32Array(256);
@@ -367,8 +386,7 @@ export function initializeOcrUi(doc = document) {
         histogram[lightness]++;
         totalBrightness += lightness;
       }
-      // Dynamic Otsu threshold retains Korean strokes across different
-      // brightness settings, unlike the former hard-coded 151/108 cutoffs.
+      // Otsu threshold for bright/dark binary modes.
       let bestVariance = -1;
       let threshold = 128;
       let backgroundPixels = 0;
@@ -394,7 +412,7 @@ export function initializeOcrUi(doc = document) {
         data[p] = data[p + 1] = data[p + 2] = value;
         data[p + 3] = 255;
       }
-      workContext.putImageData(frame, 0, 0);
+      workContext.putImageData(frame, padding, padding);
     }
     return workCanvas;
   }
@@ -466,15 +484,18 @@ export function initializeOcrUi(doc = document) {
       // Recheck a damaged reading once with alternate preprocessing. Stable
       // frames are throttled; failed OCR does not cause infinite rescanning.
       if (!result.complete || confidence < MIN_AUTO_CONFIDENCE) {
-        const alternate = processSelect.value === "original" ? "light" : "original";
+        const alternate = processSelect.value === "enhanced" ? "original" : "enhanced";
         const otherImage = captureRegion(alternate);
         if (otherImage) {
           const secondary = await worker.recognize(otherImage);
           if (epoch !== session || !video) return;
           const secondaryResult = parseOcrResult(modeSelect.value, secondary?.data?.text ?? "");
           const secondaryConfidence = Number(secondary?.data?.confidence) || 0;
-          if (secondaryResult.recognized > result.recognized ||
-            (secondaryResult.recognized === result.recognized && secondaryConfidence > confidence)) {
+          const winner = bestOcrCandidate(
+            { result, confidence },
+            { result: secondaryResult, confidence: secondaryConfidence },
+          );
+          if (winner.result === secondaryResult) {
             chosen = secondary;
             result = secondaryResult;
           }
