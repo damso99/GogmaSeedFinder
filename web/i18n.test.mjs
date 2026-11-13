@@ -168,5 +168,5 @@ test("ko is the default locale, while a saved language remains preferred", () =>
   assert.equal(translator("en").context.getLocale(), "en");
   assert.equal(translator("zh-Hant").context.getLocale(), "zh-Hant");
   assert.match(htmlSource, /<html lang="ko">/);
-  assert.match(htmlSource, /<option value="ko" selected>한국어<\\/option>/);
+  assert.ok(htmlSource.includes('<option value="ko" selected>한국어</option>'));
 });
