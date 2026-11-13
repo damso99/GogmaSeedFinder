@@ -3628,3 +3628,15 @@ button:disabled {
   object-fit: contain;
   image-rendering: auto;
 }
+
+/* Experimental event-based OCR progress remains independent of the text result. */
+.ocr-event-state {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: #c6d2bb;
+  background: #141913;
+  font-size: .81rem;
+  line-height: 1.55;
+}
