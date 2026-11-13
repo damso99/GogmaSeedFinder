@@ -34,6 +34,7 @@ const TEXT = {
     partial: "인식된 옵션: ",
     ready: "입력 준비 완료: ",
     waiting: "동일한 결과를 한 번 더 확인하는 중…",
+    visualWaiting: "옵션은 읽었지만 실제 화면 변경이 확인되지 않아 자동 입력을 보류했습니다. 결과를 확인하고 수동 입력할 수 있습니다.",
     lowConfidence: "인식 신뢰도가 낮아 자동 입력을 보류했습니다. 결과를 확인하고 수동 입력하세요.",
     duplicate: "현재 결과는 이미 입력되어 있습니다. 같은 화면에서는 인식을 반복하거나 새 행을 추가하지 않습니다. 실제로 동일한 결과가 연속 출현했다면 수동 입력하세요.",
     paused: "인식이 일시정지되었습니다.",
@@ -66,6 +67,7 @@ const TEXT = {
     partial: "Recognized options: ",
     ready: "Ready to apply: ",
     waiting: "Confirming the same result again…",
+    visualWaiting: "No meaningful screen change detected. Auto-fill withheld; verify and use manual add if appropriate.",
     lowConfidence: "Recognition confidence is low. Auto-fill paused; inspect before adding manually.",
     duplicate: "Already recorded this result. Move to the next result, or use the manual add button for an identical consecutive roll.",
     paused: "Recognition paused.",
@@ -98,6 +100,7 @@ const TEXT = {
     partial: "認識した項目: ",
     ready: "入力可能: ",
     waiting: "同じ結果を再確認中…",
+    visualWaiting: "画面の変化が確認できないため自動入力を保留しています。必要な場合は手動で追加してください。",
     lowConfidence: "認識精度が低いため自動入力を保留しました。手動で確認してください。",
     duplicate: "すでに入力した結果です。次の結果へ進むか、同一の連続結果なら手動で追加してください。",
     paused: "認識を一時停止しました。",
@@ -130,6 +133,7 @@ const TEXT = {
     partial: "已辨識項目：",
     ready: "可填入：",
     waiting: "正在再次確認相同結果…",
+    visualWaiting: "尚未偵測到畫面變更，已暫緩自動輸入。必要時請手動新增。",
     lowConfidence: "辨識可信度偏低，暫停自動填入。請確認後手動輸入。",
     duplicate: "此結果已輸入。請切換至下個結果；連續相同結果可用手動新增。",
     paused: "辨識已暫停。",
@@ -219,6 +223,7 @@ export function initializeOcrUi(doc = document) {
   let workerPromise = null;
   let lastResult = null;
   let lastConfidence = 0;
+  let displayedConfidence = 0;
   let lastRejectedSignature = null;
   let lastRejectedMessage = "";
   let currentFrame = null;
@@ -234,6 +239,7 @@ export function initializeOcrUi(doc = document) {
   function resetReading() {
     lastResult = null;
     lastConfidence = 0;
+    displayedConfidence = 0;
     lastRejectedSignature = null;
     lastRejectedMessage = "";
     frameThrottle.reset();
@@ -483,8 +489,15 @@ export function initializeOcrUi(doc = document) {
       const savedResultOnScreen = lastResult?.complete
         && sequencers[lastResult.mode].alreadyApplied(lastResult.signature);
       const holdSavedOutput = savedResultOnScreen && !readyToApply;
-      if (!holdSavedOutput && (!lastResult?.complete || result.complete)) {
+      const holdUnconfirmedChange = lastResult?.complete && result.complete
+        && result.signature !== lastResult.signature && !readyToApply;
+      const improvedPartial = !lastResult || result.recognized > lastResult.recognized
+        || (result.recognized === lastResult.recognized
+          && lastConfidence >= displayedConfidence + 15);
+      if (!holdSavedOutput && !holdUnconfirmedChange
+        && (result.complete || (!lastResult?.complete && improvedPartial))) {
         lastResult = result;
+        displayedConfidence = lastConfidence;
         const nextOutput = `${rawText.trim() || "—"}\n\n[${result.recognized}/${result.mode === "skill" ? 2 : 5}] ${result.labels.join(" / ")}`;
         if (output.textContent !== nextOutput) output.textContent = nextOutput;
         applyButton.disabled = !result.complete;
@@ -497,8 +510,11 @@ export function initializeOcrUi(doc = document) {
         }
       } else if (lastRejectedSignature === result.signature) {
         setStatus(lastRejectedMessage, "error");
-      } else if (readyToApply && autoCheck.checked && lastConfidence >= MIN_AUTO_CONFIDENCE) {
+      } else if (readyToApply && autoCheck.checked && lastConfidence >= MIN_AUTO_CONFIDENCE
+        && frameThrottle.canAdvance(currentFrame)) {
         applyResult(result);
+      } else if (readyToApply && autoCheck.checked && lastConfidence >= MIN_AUTO_CONFIDENCE) {
+        setStatus(translations.visualWaiting);
       } else if (readyToApply && autoCheck.checked && lastConfidence < MIN_AUTO_CONFIDENCE) {
         setStatus(`${translations.lowConfidence} (${Math.round(lastConfidence)}%)`);
       } else if (!readyToApply) {
