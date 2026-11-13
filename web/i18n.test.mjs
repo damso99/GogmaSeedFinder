@@ -155,5 +155,18 @@ test("ko: Korean game terms and dynamic rows preserve engine identifiers", () =>
   assert.equal(t("再付与2のシリーズスキル"), "2회차 시리즈 스킬");
   const missing = vm.runInContext("Object.keys(ALL_TEXT).filter((key) => !Object.hasOwn(KO_TEXT, key))", context);
   assert.deepEqual([...missing], []);
-  assert.match(htmlSource, /<option value="ko">한국어<\/option>/);
+  assert.match(htmlSource, /<option value="ko" selected>한국어<\/option>/);
+});
+
+
+test("ko is the default locale, while a saved language remains preferred", () => {
+  const { context, t } = translator(null);
+  assert.equal(context.getLocale(), "ko");
+  assert.equal(t("使い方"), "사용 방법");
+  assert.equal(translator("invalid-locale").context.getLocale(), "ko");
+  assert.equal(translator("ja").context.getLocale(), "ja");
+  assert.equal(translator("en").context.getLocale(), "en");
+  assert.equal(translator("zh-Hant").context.getLocale(), "zh-Hant");
+  assert.match(htmlSource, /<html lang="ko">/);
+  assert.match(htmlSource, /<option value="ko" selected>한국어<\\/option>/);
 });
