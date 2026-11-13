@@ -13,12 +13,12 @@ export function ocrRenderSize(width, height, {
   padding = DEFAULT_PADDING,
 } = {}) {
   if (!(width > 0 && height > 0)) return null;
-  const scale = Math.max(1, Math.min(
+  const scale = Math.min(
     preferredScale,
     maxWidth / width,
     maxHeight / height,
     Math.sqrt(maxPixels / (width * height)),
-  ));
+  );
   const renderedWidth = Math.max(1, Math.round(width * scale));
   const renderedHeight = Math.max(1, Math.round(height * scale));
   return {
