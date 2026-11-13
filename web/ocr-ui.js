@@ -407,25 +407,54 @@ export function initializeOcrUi(doc = document) {
   async function scan() {
     if (running || paused || !video || !region || video.readyState < 2) return;
     const epoch = session;
-    const image = captureRegion();
-    if (!image) return;
     running = true;
     try {
-      setStatus(workerPromise ? translations.reading : translations.loading);
       const worker = await getWorker();
       if (epoch !== session || !video) return;
-      setStatus(translations.reading);
-      const ocr = await worker.recognize(image);
+      const frame = snapshotRegion();
+      if (!frame || !frameThrottle.shouldScan(frame)) return;
+      currentFrame = frame;
+      const image = captureRegion();
+      if (!image) return;
+      const primary = await worker.recognize(image);
       if (epoch !== session || !video) return;
-      const rawText = ocr?.data?.text ?? "";
-      lastConfidence = Number(ocr?.data?.confidence) || 0;
-      const result = parseOcrResult(modeSelect.value, rawText);
-      lastResult = result;
-      output.textContent = `${rawText.trim() || "—"}\n\n[${result.recognized}/${result.mode === "skill" ? 2 : 5}] ${result.labels.join(" / ")}`;
-      applyButton.disabled = !result.complete;
+      let chosen = primary;
+      let result = parseOcrResult(modeSelect.value, primary?.data?.text ?? "");
+      const confidence = Number(primary?.data?.confidence) || 0;
+      // Recheck a damaged reading once with alternate preprocessing. Stable
+      // frames are throttled; failed OCR does not cause infinite rescanning.
+      if (!result.complete || confidence < MIN_AUTO_CONFIDENCE) {
+        const alternate = processSelect.value === "original" ? "light" : "original";
+        const otherImage = captureRegion(alternate);
+        if (otherImage) {
+          const secondary = await worker.recognize(otherImage);
+          if (epoch !== session || !video) return;
+          const secondaryResult = parseOcrResult(modeSelect.value, secondary?.data?.text ?? "");
+          const secondaryConfidence = Number(secondary?.data?.confidence) || 0;
+          if (secondaryResult.recognized > result.recognized ||
+            (secondaryResult.recognized === result.recognized && secondaryConfidence > confidence)) {
+            chosen = secondary;
+            result = secondaryResult;
+          }
+        }
+      }
+      const rawText = chosen?.data?.text ?? "";
+      lastConfidence = Number(chosen?.data?.confidence) || 0;
+      // A partial/incorrect scan must not wipe out a previously complete
+      // observation or make the on-screen result flicker.
+      if (!lastResult?.complete || result.complete) {
+        lastResult = result;
+        const nextOutput = `${rawText.trim() || "—"}\n\n[${result.recognized}/${result.mode === "skill" ? 2 : 5}] ${result.labels.join(" / ")}`;
+        if (output.textContent !== nextOutput) output.textContent = nextOutput;
+        applyButton.disabled = !result.complete;
+      }
       const readyToApply = sequencers[result.mode].observe(result);
       if (!result.complete) {
-        setStatus(result.recognized ? `${translations.partial}${result.recognized}/${result.mode === "skill" ? 2 : 5}` : translations.noResult);
+        if (!lastResult?.complete) {
+          setStatus(result.recognized
+            ? `${translations.partial}${result.recognized}/${result.mode === "skill" ? 2 : 5}`
+            : translations.noResult);
+        }
       } else if (lastRejectedSignature === result.signature) {
         setStatus(lastRejectedMessage, "error");
       } else if (readyToApply && autoCheck.checked && lastConfidence >= MIN_AUTO_CONFIDENCE) {
@@ -433,15 +462,17 @@ export function initializeOcrUi(doc = document) {
       } else if (readyToApply && autoCheck.checked && lastConfidence < MIN_AUTO_CONFIDENCE) {
         setStatus(`${translations.lowConfidence} (${Math.round(lastConfidence)}%)`);
       } else if (!readyToApply) {
-        setStatus(sequencers[result.mode].alreadyApplied(result.signature)
-          ? translations.duplicate : translations.waiting);
+        if (sequencers[result.mode].alreadyApplied(result.signature)) {
+          // Keep the successful entry visible instead of "recognizing" it anew.
+          if (status.dataset.state !== "success") setStatus(translations.duplicate);
+        } else {
+          setStatus(translations.waiting);
+        }
       } else {
         setStatus(translations.ready + result.labels.join(" / "));
       }
     } catch (error) {
-      if (epoch === session) {
-        setStatus(`${translations.failure} ${error?.message ?? ""}`, "error");
-      }
+      if (epoch === session) setStatus(`${translations.failure} ${error?.message ?? ""}`, "error");
     } finally {
       running = false;
     }
