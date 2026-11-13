@@ -22,6 +22,7 @@ const TEXT = {
     dark: "밝은 배경 · 어두운 글자",
     original: "전처리 없이 원본 인식",
     resetArea: "영역 다시 지정",
+    retry: "다시 인식",
     pause: "인식 일시정지",
     resume: "인식 재개",
     applyOnce: "인식 결과 한 번 입력",
@@ -53,6 +54,7 @@ const TEXT = {
     dark: "Light background · dark text",
     original: "Original image",
     resetArea: "Reselect region",
+    retry: "Read again",
     pause: "Pause recognition",
     resume: "Resume recognition",
     applyOnce: "Add recognized result once",
@@ -84,6 +86,7 @@ const TEXT = {
     dark: "明るい背景・暗い文字",
     original: "画像のまま",
     resetArea: "範囲を再選択",
+    retry: "もう一度認識",
     pause: "認識を一時停止",
     resume: "認識を再開",
     applyOnce: "認識結果を1回入力",
@@ -115,6 +118,7 @@ const TEXT = {
     dark: "淺色背景·深色文字",
     original: "原始影像",
     resetArea: "重新選取區域",
+    retry: "重新辨識",
     pause: "暫停辨識",
     resume: "繼續辨識",
     applyOnce: "輸入辨識結果一次",
@@ -179,6 +183,7 @@ export function initializeOcrUi(doc = document) {
   const processSelect = $("#ocr-preprocess");
   const autoCheck = $("#ocr-auto");
   const resetButton = $("#ocr-reset-area");
+  const retryButton = $("#ocr-retry");
   const pauseButton = $("#ocr-toggle-pause");
   const applyButton = $("#ocr-apply-once");
   const status = $("#ocr-status");
@@ -548,6 +553,7 @@ export function initializeOcrUi(doc = document) {
   });
   processSelect.addEventListener("change", () => {
     session++;
+    sequencers[modeSelect.value].clearPending();
     resetReading();
   });
   autoCheck.addEventListener("change", () => {
@@ -558,6 +564,11 @@ export function initializeOcrUi(doc = document) {
     region = null;
     delete regions[modeSelect.value];
     try { localStorage.setItem(REGIONS_STORAGE_KEY, JSON.stringify(regions)); } catch {}
+    sequencers[modeSelect.value].clearPending();
+    resetReading();
+  });
+  retryButton?.addEventListener("click", () => {
+    session++;
     sequencers[modeSelect.value].clearPending();
     resetReading();
   });
