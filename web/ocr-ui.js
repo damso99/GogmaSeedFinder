@@ -6,6 +6,7 @@ import { pointerToCanvasImage } from "./ocr-geometry.js";
 import { buildHudFingerprint, stabilizeTransition } from "./ocr-hud.js";
 import { frameDifference } from "./ocr-frame.js";
 import { recognizeResultRows } from "./ocr-lines.js";
+import { loadOcrSnapshots, lastSavedOcrSignature } from "./ocr-observation-store.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1200;
@@ -247,6 +248,13 @@ export function initializeOcrUi(doc = document) {
     artian: createOcrSequencer(),
     skill: createOcrSequencer(),
   };
+  // Reloading the page does not mean the game performed another roll. Keep
+  // the last recorded signature so a reconnected capture cannot duplicate it.
+  const previousOcrSnapshots = loadOcrSnapshots(localStorage);
+  for (const mode of ["gogma", "artian", "skill"]) {
+    const signature = lastSavedOcrSignature(mode, previousOcrSnapshots[mode]);
+    if (signature) sequencers[mode].applied({ signature });
+  }
 
   let video = null;
   let session = 0;
