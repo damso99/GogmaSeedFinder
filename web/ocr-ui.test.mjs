@@ -458,7 +458,8 @@ test("experimental mode does not auto-fill a single OCR pass", async () => {
   s.nodes["ocr-event-mode"].dispatchEvent({type:"change"});
   await s.ui.scan();
   await s.ui.scan();
-  await s.ui.scan();
   assert.equal(s.observed.length,0);
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
   s.ui.stop();
 });
