@@ -3585,3 +3585,30 @@ button:disabled {
   .ocr-preprocess-field { margin-left: 0; width: 100%; }
   .ocr-actions button { flex: 1 1 135px; }
 }
+
+/* Optional OCR source preview for tuning small Korean text crops. */
+.ocr-enhanced-details {
+  margin-top: 11px;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #151812;
+}
+.ocr-enhanced-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .83rem;
+  font-weight: 700;
+}
+#ocr-enhanced-preview {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: 270px;
+  margin-top: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  object-fit: contain;
+  image-rendering: auto;
+}
