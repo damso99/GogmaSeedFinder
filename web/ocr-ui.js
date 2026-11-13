@@ -2,7 +2,7 @@ import { getLocale } from "./i18n.js";
 import { createOcrSequencer, parseOcrResult } from "./ocr-parser.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
-const OCR_INTERVAL_MS = 2400;
+const OCR_INTERVAL_MS = 1800;
 const PREVIEW_INTERVAL_MS = 180;
 const MIN_AUTO_CONFIDENCE = 35;
 const REGIONS_STORAGE_KEY = "gogma-ocr-regions-v1";
@@ -208,6 +208,7 @@ export function initializeOcrUi(doc = document) {
   let lastResult = null;
   let lastConfidence = 0;
   let lastRejectedSignature = null;
+  let lastRejectedMessage = "";
   let region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
   let pointerOrigin = null;
   let pointerRegion = null;
@@ -221,6 +222,7 @@ export function initializeOcrUi(doc = document) {
     lastResult = null;
     lastConfidence = 0;
     lastRejectedSignature = null;
+    lastRejectedMessage = "";
     applyButton.disabled = true;
     output.textContent = "—";
     setStatus(region ? translations.reading : translations.selectArea);
@@ -362,9 +364,11 @@ export function initializeOcrUi(doc = document) {
     if (reply.success) {
       sequencers[result.mode].applied(result);
       lastRejectedSignature = null;
+      lastRejectedMessage = "";
       setStatus(reply.message, "success");
     } else {
       lastRejectedSignature = result.signature;
+      lastRejectedMessage = reply.message;
       setStatus(reply.message, "error");
     }
     // Manual confirmation can record intentionally repeated, identical rolls.
@@ -378,7 +382,7 @@ export function initializeOcrUi(doc = document) {
     if (!image) return;
     running = true;
     try {
-      setStatus(translations.loading);
+      setStatus(workerPromise ? translations.reading : translations.loading);
       const worker = await getWorker();
       if (epoch !== session || !video) return;
       setStatus(translations.reading);
@@ -394,13 +398,14 @@ export function initializeOcrUi(doc = document) {
       if (!result.complete) {
         setStatus(result.recognized ? `${translations.partial}${result.recognized}/${result.mode === "skill" ? 2 : 5}` : translations.noResult);
       } else if (lastRejectedSignature === result.signature) {
-        setStatus(translations.ready + result.labels.join(" / ") + " · " + translations.lowConfidence);
+        setStatus(lastRejectedMessage, "error");
       } else if (readyToApply && autoCheck.checked && lastConfidence >= MIN_AUTO_CONFIDENCE) {
         applyResult(result);
       } else if (readyToApply && autoCheck.checked && lastConfidence < MIN_AUTO_CONFIDENCE) {
         setStatus(`${translations.lowConfidence} (${Math.round(lastConfidence)}%)`);
       } else if (!readyToApply) {
-        setStatus(translations.waiting);
+        setStatus(sequencers[result.mode].alreadyApplied(result.signature)
+          ? translations.duplicate : translations.waiting);
       } else {
         setStatus(translations.ready + result.labels.join(" / "));
       }
@@ -471,6 +476,14 @@ export function initializeOcrUi(doc = document) {
   applyButton.addEventListener("click", () => {
     if (lastResult?.complete) applyResult(lastResult, true);
   });
+  for (const selector of ["#weapon-type", "#attribute-force",
+    "#artian-search-weapon-type", "#artian-search-attribute-force"]) {
+    $(selector)?.addEventListener("change", () => {
+      lastRejectedSignature = null;
+      lastRejectedMessage = "";
+      sequencers[modeSelect.value].reset();
+    });
+  }
   doc.addEventListener("gogma:screen-share-started", (event) => {
     stop();
     video = event.detail?.video ?? null;
