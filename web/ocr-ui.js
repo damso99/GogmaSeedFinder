@@ -23,6 +23,7 @@ const TEXT = {
     dark: "밝은 배경 · 어두운 글자",
     original: "원본 인식",
     enhanced: "선명하게 보정 (권장)",
+    enhancedPreview: "OCR에 전달되는 보정 이미지 확인",
     resetArea: "영역 다시 지정",
     retry: "다시 인식",
     pause: "인식 일시정지",
@@ -57,6 +58,7 @@ const TEXT = {
     dark: "Light background · dark text",
     original: "Original image",
     enhanced: "Enhanced clarity (recommended)",
+    enhancedPreview: "Preview processed OCR image",
     resetArea: "Reselect region",
     retry: "Read again",
     pause: "Pause recognition",
@@ -91,6 +93,7 @@ const TEXT = {
     dark: "明るい背景・暗い文字",
     original: "画像のまま",
     enhanced: "鮮明化（推奨）",
+    enhancedPreview: "OCR画像を確認",
     resetArea: "範囲を再選択",
     retry: "もう一度認識",
     pause: "認識を一時停止",
@@ -125,6 +128,7 @@ const TEXT = {
     dark: "淺色背景·深色文字",
     original: "原始影像",
     enhanced: "強化清晰度（建議）",
+    enhancedPreview: "檢視增強影像",
     resetArea: "重新選取區域",
     retry: "重新辨識",
     pause: "暫停辨識",
@@ -197,6 +201,8 @@ export function initializeOcrUi(doc = document) {
   const applyButton = $("#ocr-apply-once");
   const status = $("#ocr-status");
   const output = $("#ocr-recognized");
+  const processedPreview = $("#ocr-enhanced-preview");
+  const processedContext = processedPreview?.getContext("2d") ?? null;
   const translations = TEXT[getLocale()] ?? TEXT.ko;
   doc.querySelectorAll("[data-ocr-text]").forEach((node) => {
     const translation = translations[node.dataset.ocrText];
@@ -413,6 +419,17 @@ export function initializeOcrUi(doc = document) {
         data[p + 3] = 255;
       }
       workContext.putImageData(frame, padding, padding);
+    }
+    // The user can inspect the exact most recently processed OCR crop.
+    // Downsample only the visual preview, never the full-resolution OCR input.
+    if (processedPreview && processedContext) {
+      const ratio = Math.min(1, 720 / workCanvas.width);
+      processedPreview.width = Math.max(1, Math.floor(workCanvas.width * ratio));
+      processedPreview.height = Math.max(1, Math.floor(workCanvas.height * ratio));
+      processedContext.imageSmoothingEnabled = true;
+      processedContext.imageSmoothingQuality = "high";
+      processedContext.drawImage(workCanvas, 0, 0,
+        processedPreview.width, processedPreview.height);
     }
     return workCanvas;
   }
