@@ -3491,19 +3491,35 @@ button:disabled {
   margin-left: auto;
 }
 
+.ocr-capture-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px 22px;
+  margin-bottom: 12px;
+}
+.ocr-capture-settings .ocr-mode-field select {
+  min-width: 125px;
+}
+.ocr-capture-settings .ocr-checkbox {
+  min-height: 41px;
+}
 .ocr-preview-frame {
-  overflow: hidden;
+  overflow: auto;
+  max-width: 100%;
+  max-height: 70vh;
   border: 1px solid #535745;
   border-radius: 12px;
   background: #080a08;
   line-height: 0;
+  scrollbar-width: thin;
 }
-
 #ocr-preview {
   display: block;
   width: 100%;
   height: auto;
-  max-height: 55vh;
+  max-height: none;
+  max-width: none;
   object-fit: contain;
   cursor: crosshair;
   touch-action: none;
