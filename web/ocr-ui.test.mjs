@@ -9,6 +9,8 @@ const files = {
   parser: readFileSync(new URL("./ocr-parser.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
     .replace(/^export /gm, ""),
+  frame: readFileSync(new URL("./ocr-frame.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
   ui: readFileSync(new URL("./ocr-ui.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
     .replace(/^export /gm, "")
@@ -16,6 +18,7 @@ const files = {
 };
 
 function setup(initialText) {
+  let frameLevel = 0;
   class Node {
     constructor(id) {
       this.id = id;
@@ -47,15 +50,25 @@ function setup(initialText) {
     getBoundingClientRect() { return { left: 0, top: 0, width: 960, height: 540 }; }
     setPointerCapture() {}
     getContext() {
+      const node = this;
       return {
         drawImage() {}, fillRect() {}, strokeRect() {}, putImageData() {},
-        getImageData() { return { data: new Uint8ClampedArray(20) }; },
+        getImageData() {
+          const data = new Uint8ClampedArray(node.width === 192 ? 128 : 20);
+          if (node.width === 192) {
+            for (let i = 0; i < data.length; i += 4) {
+              data[i] = data[i + 1] = data[i + 2] = frameLevel;
+              data[i + 3] = 255;
+            }
+          }
+          return { data };
+        },
       };
     }
   }
   const names = [
     "ocr-panel", "ocr-preview", "ocr-mode", "ocr-preprocess", "ocr-auto",
-    "ocr-reset-area", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
+    "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
     "ocr-recognized", "weapon-type", "attribute-force", "artian-search-weapon-type",
     "artian-search-attribute-force",
   ];
@@ -108,6 +121,7 @@ function setup(initialText) {
   });
   vm.runInContext(files.korean, context);
   vm.runInContext(files.parser, context);
+  vm.runInContext(files.frame, context);
   vm.runInContext(files.ui, context);
   const ui = vm.runInContext("initializeOcrUi(document)", context);
   const observed = [];
@@ -122,6 +136,7 @@ function setup(initialText) {
   return {
     nodes, doc, ui, observed, video, CustomEvent,
     setText(value) { text = value; },
+    setFrame(value) { frameLevel = value; },
     getRecognitionCount: () => recognitionCount,
     getWorkersTerminated: () => workersTerminated,
   };
@@ -169,5 +184,83 @@ test("pausing recognition prevents automatic input", async () => {
   await s.ui.scan();
   await s.ui.scan();
   assert.equal(s.observed.length, 1);
+  s.ui.stop();
+});
+
+test("the same physical screen does not keep refreshing OCR output", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(text);
+  await s.ui.scan();
+  await s.ui.scan();
+  const savedOutput = s.nodes["ocr-recognized"].textContent;
+  const savedStatus = s.nodes["ocr-status"].textContent;
+  const count = s.getRecognitionCount();
+  s.setText("부정확한 문자\n여러번 잘못 인식됨");
+  for (let i = 0; i < 12; i++) await s.ui.scan();
+  assert.equal(s.getRecognitionCount(), count);
+  assert.equal(s.observed.length, 1);
+  assert.equal(s.nodes["ocr-recognized"].textContent, savedOutput);
+  assert.equal(s.nodes["ocr-status"].textContent, savedStatus);
+  s.ui.stop();
+});
+
+test("an unstable OCR pass cannot append the previous roll after a changed frame", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(text);
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  s.setFrame(160);
+  s.setText("오류\n문자\n강화");
+  await s.ui.scan();
+  await s.ui.scan();
+  s.setFrame(0);
+  s.setText(text);
+  for (let i = 0; i < 8; i++) await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  s.ui.stop();
+});
+
+test("a genuinely changed result automatically enters the next observation row", async () => {
+  const s = setup("기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX");
+  await s.ui.scan();
+  await s.ui.scan();
+  s.setFrame(160);
+  s.setText("회심률 강화Ⅲ\n기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅱ\n회심률 강화 EX\n예리도 강화");
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 2);
+  assert.deepEqual([...s.observed[1].ids], [13, 8, 8, 16, 6]);
+  for (let i = 0; i < 8; i++) await s.ui.scan();
+  assert.equal(s.observed.length, 2);
+  s.ui.stop();
+});
+
+test("retry on an unchanged frame cannot automatically insert an identical roll", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(text);
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  s.nodes["ocr-retry"].click();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  s.ui.stop();
+});
+
+test("the last saved text stays visible during an unconfirmed new OCR reading", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(text);
+  await s.ui.scan();
+  await s.ui.scan();
+  const saved = s.nodes["ocr-recognized"].textContent;
+  s.setFrame(170);
+  s.setText("회심률 강화Ⅲ\n기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅱ\n회심률 강화 EX\n예리도 강화");
+  await s.ui.scan();
+  assert.equal(s.nodes["ocr-recognized"].textContent, saved);
+  await s.ui.scan();
+  assert.notEqual(s.nodes["ocr-recognized"].textContent, saved);
+  assert.equal(s.observed.length, 2);
   s.ui.stop();
 });

@@ -68,7 +68,7 @@
             <select id="ocr-preprocess">
               <option value="light" data-ocr-text="light">어두운 배경 · 밝은 글자</option>
               <option value="dark" data-ocr-text="dark">밝은 배경 · 어두운 글자</option>
-              <option value="original" data-ocr-text="original">전처리 없이 원본 인식</option>
+              <option value="original" data-ocr-text="original" selected>전처리 없이 원본 인식</option>
             </select>
           </label>
         </div>
@@ -77,6 +77,7 @@
         </div>
         <div class="ocr-actions">
           <button type="button" id="ocr-reset-area" class="secondary" data-ocr-text="resetArea">영역 다시 지정</button>
+          <button type="button" id="ocr-retry" class="secondary" data-ocr-text="retry">다시 인식</button>
           <button type="button" id="ocr-toggle-pause" class="secondary" data-ocr-text="pause">인식 일시정지</button>
           <button type="button" id="ocr-apply-once" class="primary" disabled data-ocr-text="applyOnce">인식 결과 한 번 입력</button>
         </div>

@@ -64,7 +64,7 @@ test("never accept incomplete or extra bonus lines", () => {
   assert.equal(recognize("gogma", text + "\n예리도 강화\n회심률 강화 EX").complete, false);
 });
 
-test("stable results apply once and only rearm after a result transition", () => {
+test("incomplete OCR cannot rearm already recorded results; different confirmed rolls still work", () => {
   const create = vm.runInContext("createOcrSequencer", context);
   const sequencer = create();
   const first = recognize("artian", "기초 공격력 강화\n회심률 강화\n예리도 강화\n기초 공격력 강화\n회심률 강화");
@@ -76,9 +76,14 @@ test("stable results apply once and only rearm after a result transition", () =>
   assert.equal(sequencer.observe(next), false);
   assert.equal(sequencer.observe(next), true);
   sequencer.applied(next);
-  for (let index = 0; index < 3; index++) {
+  for (let index = 0; index < 6; index++) {
     assert.equal(sequencer.observe({ complete: false }), false);
+    assert.equal(sequencer.observe(next), false);
   }
   assert.equal(sequencer.observe(next), false);
-  assert.equal(sequencer.observe(next), true);
+  assert.equal(sequencer.alreadyApplied(next.signature), true);
+  sequencer.clearPending();
+  assert.equal(sequencer.alreadyApplied(next.signature), true);
+  assert.equal(sequencer.observe(first), false);
+  assert.equal(sequencer.observe(first), true);
 });
