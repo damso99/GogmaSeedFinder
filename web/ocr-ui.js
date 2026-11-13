@@ -2,6 +2,7 @@ import { getLocale } from "./i18n.js";
 import { createOcrSequencer, parseOcrResult } from "./ocr-parser.js";
 import { createFrameThrottle } from "./ocr-frame.js";
 import { ocrRenderSize, enhanceOcrImageData, bestOcrCandidate } from "./ocr-image.js";
+import { pointerToCanvasImage } from "./ocr-geometry.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1800;
@@ -194,6 +195,7 @@ export function initializeOcrUi(doc = document) {
   if (!panel || !preview) return null;
   const modeSelect = $("#ocr-mode");
   const processSelect = $("#ocr-preprocess");
+  const zoomSelect = $("#ocr-preview-zoom");
   const autoCheck = $("#ocr-auto");
   const resetButton = $("#ocr-reset-area");
   const retryButton = $("#ocr-retry");
@@ -260,13 +262,18 @@ export function initializeOcrUi(doc = document) {
     setStatus(region ? translations.reading : translations.selectArea);
   }
 
-  function screenPoint(event) {
-    const rect = preview.getBoundingClientRect();
-    return {
-      x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
-    };
+  function screenPoint(event, clamp = false) {
+    // The image is drawn in its original aspect ratio, but 'contain' can
+    // introduce invisible letterbox areas in constrained layouts.
+    return pointerToCanvasImage(
+      event, preview.getBoundingClientRect(), preview.width, preview.height,
+      { fit: "contain", clamp },
+    );
   }
+  zoomSelect?.addEventListener("change", () => {
+    const value = Number(zoomSelect.value);
+    preview.style.width = value === 1.5 ? "150%" : value === 2 ? "200%" : "100%";
+  });
 
   function selectionFromCorners(a, b) {
     return {
@@ -280,16 +287,21 @@ export function initializeOcrUi(doc = document) {
   preview.addEventListener("pointerdown", (event) => {
     if (!video || event.button !== 0) return;
     pointerOrigin = screenPoint(event);
+    if (!pointerOrigin) return;
     pointerRegion = null;
     preview.setPointerCapture?.(event.pointerId);
   });
   preview.addEventListener("pointermove", (event) => {
     if (!pointerOrigin) return;
-    pointerRegion = selectionFromCorners(pointerOrigin, screenPoint(event));
+    const point = screenPoint(event, true);
+    if (!point) return;
+    pointerRegion = selectionFromCorners(pointerOrigin, point);
+    drawPreview();
   });
   preview.addEventListener("pointerup", (event) => {
     if (!pointerOrigin) return;
-    const chosen = selectionFromCorners(pointerOrigin, screenPoint(event));
+    const point = screenPoint(event, true);
+    const chosen = point ? selectionFromCorners(pointerOrigin, point) : null;
     pointerOrigin = null;
     pointerRegion = null;
     if (!validRegion(chosen)) {
@@ -310,10 +322,11 @@ export function initializeOcrUi(doc = document) {
 
   function drawPreview() {
     if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
-    const h = Math.max(160, Math.round(960 * video.videoHeight / video.videoWidth));
-    if (preview.width !== 960 || preview.height !== h) {
-      preview.width = 960;
-      preview.height = h;
+    const width = Math.min(video.videoWidth, 1920);
+    const height = Math.round(width * video.videoHeight / video.videoWidth);
+    if (preview.width !== width || preview.height !== height) {
+      preview.width = width;
+      preview.height = height;
     }
     context.drawImage(video, 0, 0, preview.width, preview.height);
     const area = pointerRegion ?? region;
