@@ -68,7 +68,7 @@ function setup(initialText) {
   }
   const names = [
     "ocr-panel", "ocr-preview", "ocr-mode", "ocr-preprocess", "ocr-auto",
-    "ocr-reset-area", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
+    "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
     "ocr-recognized", "weapon-type", "attribute-force", "artian-search-weapon-type",
     "artian-search-attribute-force",
   ];
@@ -232,6 +232,35 @@ test("a genuinely changed result automatically enters the next observation row",
   assert.equal(s.observed.length, 2);
   assert.deepEqual([...s.observed[1].ids], [13, 8, 8, 16, 6]);
   for (let i = 0; i < 8; i++) await s.ui.scan();
+  assert.equal(s.observed.length, 2);
+  s.ui.stop();
+});
+
+test("retry on an unchanged frame cannot automatically insert an identical roll", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(text);
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  s.nodes["ocr-retry"].click();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  s.ui.stop();
+});
+
+test("the last saved text stays visible during an unconfirmed new OCR reading", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(text);
+  await s.ui.scan();
+  await s.ui.scan();
+  const saved = s.nodes["ocr-recognized"].textContent;
+  s.setFrame(170);
+  s.setText("회심률 강화Ⅲ\n기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅱ\n회심률 강화 EX\n예리도 강화");
+  await s.ui.scan();
+  assert.equal(s.nodes["ocr-recognized"].textContent, saved);
+  await s.ui.scan();
+  assert.notEqual(s.nodes["ocr-recognized"].textContent, saved);
   assert.equal(s.observed.length, 2);
   s.ui.stop();
 });
