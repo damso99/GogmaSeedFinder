@@ -3332,3 +3332,256 @@ button:disabled {
     grid-column: auto;
   }
 }
+
+
+/* Guided screen sharing, independent from the calculator. */
+.capture-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px 26px;
+  padding: 20px 24px;
+  margin: 0 0 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(110deg, #24271f, #1b1e19);
+}
+.capture-panel-copy { flex: 1 1 300px; min-width: 0; }
+.capture-panel-copy .step { margin: 0 0 6px; }
+.capture-panel-copy h2 { margin: 0 0 7px; font-size: clamp(1rem, 1.6vw, 1.24rem); }
+.capture-panel-copy > p:last-child { margin: 0; color: var(--muted); font-size: 0.84rem; line-height: 1.55; }
+.capture-panel-controls { display: grid; justify-items: end; gap: 10px; }
+.capture-status { font-size: 0.77rem; color: var(--muted); max-width: 420px; text-align: right; line-height: 1.5; }
+.capture-status[data-state="connected"] { color: #a8d5a1; }
+.capture-status[data-state="selecting"] { color: var(--gold-bright); }
+.capture-status[data-state="error"] { color: var(--danger); }
+.capture-buttons, .capture-guide-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.capture-buttons button, .capture-guide-actions button {
+  min-height: 42px;
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 0.83rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+#capture-video[hidden] { display: none; }
+.capture-guide-dialog {
+  width: min(560px, calc(100% - 28px));
+  max-height: min(85vh, 760px);
+  padding: 0;
+  overflow: auto;
+  border: 1px solid #6d6240;
+  border-radius: 18px;
+  color: #f6f0df;
+  background: #20231d;
+  box-shadow: 0 28px 72px rgb(0 0 0 / 65%);
+}
+.capture-guide-dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(3px); }
+.capture-guide-body { padding: clamp(22px, 5vw, 32px); }
+.capture-guide-body .step { margin: 0 0 10px; }
+.capture-guide-body h2 { margin: 0 0 14px; font-size: clamp(1.12rem, 3vw, 1.38rem); line-height: 1.4; }
+.capture-guide-body > p { line-height: 1.65; font-size: 0.9rem; }
+.capture-guide-steps {
+  display: grid;
+  gap: 12px;
+  padding: 18px 18px 18px 40px;
+  margin: 20px 0;
+  border: 1px solid #4a4e3b;
+  border-radius: 12px;
+  background: #181b15;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.capture-guide-steps li::marker { color: var(--gold-bright); font-weight: 800; }
+.capture-guide-note { color: var(--muted); font-size: 0.8rem !important; }
+.capture-guide-actions { margin-top: 26px; justify-content: flex-end; }
+
+@media (max-width: 720px) {
+  .capture-panel { align-items: stretch; padding: 17px; }
+  .capture-panel-controls { flex: 1 1 100%; justify-items: stretch; }
+  .capture-status { text-align: left; }
+  .capture-buttons button { flex: 1; }
+  .capture-guide-actions button { flex: 1 1 140px; }
+}
+
+
+/* Browser-only live OCR: crop selection is drawn over the user's own preview. */
+.ocr-panel {
+  margin: 0 0 20px;
+  padding: 22px 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(135deg, #23271f, #1c1f19);
+}
+
+.ocr-panel[hidden] {
+  display: none;
+}
+
+.ocr-panel-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.ocr-panel-heading > div {
+  min-width: 0;
+  flex: 1 1 330px;
+}
+
+.ocr-panel-heading h2 {
+  margin: 7px 0 7px;
+  font-size: 1.18rem;
+}
+
+.ocr-panel-heading p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.83rem;
+  line-height: 1.6;
+}
+
+.ocr-mode-field,
+.ocr-preprocess-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.79rem;
+  font-weight: 700;
+}
+
+.ocr-mode-field select,
+.ocr-preprocess-field select {
+  padding: 9px 12px;
+  min-height: 41px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #141711;
+  color: #f6f0df;
+}
+
+.ocr-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.ocr-checkbox {
+  display: inline-flex;
+  gap: 9px;
+  align-items: center;
+  color: #e5decb;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.ocr-checkbox input {
+  accent-color: var(--gold-bright);
+  width: 17px;
+  height: 17px;
+}
+
+.ocr-preprocess-field {
+  margin-left: auto;
+}
+
+.ocr-preview-frame {
+  overflow: hidden;
+  border: 1px solid #535745;
+  border-radius: 12px;
+  background: #080a08;
+  line-height: 0;
+}
+
+#ocr-preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 55vh;
+  object-fit: contain;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.ocr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.ocr-actions button {
+  min-height: 40px;
+  padding: 9px 15px;
+  border-radius: 9px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ocr-status {
+  margin: 15px 0 0;
+  padding: 10px 13px;
+  border-radius: 10px;
+  background: #131710;
+  color: var(--gold-bright);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.ocr-status[data-state="success"] {
+  color: #a8d5a1;
+  border: 1px solid rgb(131 183 123 / 20%);
+}
+
+.ocr-status[data-state="error"] {
+  color: var(--danger);
+  border: 1px solid rgb(236 140 125 / 18%);
+}
+
+.ocr-output {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid #3e4438;
+  border-radius: 10px;
+  background: #161915;
+}
+
+.ocr-output strong {
+  display: block;
+  margin-bottom: 9px;
+  color: #d6d1ba;
+  font-size: 0.82rem;
+}
+
+#ocr-recognized {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  color: #c6d2bb;
+  font: 0.8rem/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ocr-hint {
+  margin: 13px 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.7;
+}
+
+@media (max-width: 720px) {
+  .ocr-panel { padding: 16px; }
+  .ocr-mode-field { width: 100%; }
+  .ocr-preprocess-field { margin-left: 0; width: 100%; }
+  .ocr-actions button { flex: 1 1 135px; }
+}

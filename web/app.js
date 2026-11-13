@@ -364,6 +364,96 @@ let artianBaseState = persistedAppState.artianBaseState;
 renderObservationRows(SAMPLE_OBSERVATIONS);
 renderSkillObservationRows(Array.from({ length: 4 }, () => null));
 renderArtianObservationRows(Array.from({ length: 3 }, () => null));
+
+// Screen OCR never changes the RNG engine: it only fills the same observation
+// selects that users can fill manually. Acknowledge rejected readings so that
+// the capture UI can show the reason instead of silently recording wrong data.
+document.addEventListener("gogma:ocr-observation", (event) => {
+  const detail = event.detail ?? {};
+  let message = "";
+  let success = false;
+  let rowNumber = 0;
+  try {
+    const mode = detail.mode;
+    if (mode === "gogma") {
+      const ids = detail.ids;
+      if (!Array.isArray(ids) || ids.length !== 5 || ids.some((id) => !Number.isInteger(id))) {
+        throw new Error("거극 복원 옵션 5개가 모두 필요합니다.");
+      }
+      const available = new Set(availableGogmaBonuses().map(([id]) => id));
+      if (ids.some((id) => !available.has(id))) {
+        throw new Error("현재 선택된 무기 종류·속성에서 나올 수 없는 강화입니다. 거극 시드 검색 탭의 무기 설정을 확인해 주세요.");
+      }
+      let rows = snapshotObservationValues();
+      // The upstream app starts with six filled demonstration rows. Only
+      // discard them if all values still exactly match an untouched sample.
+      const sample = [SAMPLE_OBSERVATIONS, BOW_SAMPLE_OBSERVATIONS, HEAVY_BOWGUN_SAMPLE_OBSERVATIONS]
+        .some((preset) => rows.length === preset.length && rows.every((row, i) =>
+          row.length === 5 && row.every((id, j) => id === preset[i][j])
+        ));
+      if (sample) rows = [];
+      const blank = rows.findIndex((row) => row.every((id) => id === null));
+      rowNumber = blank >= 0 ? blank + 1 : rows.length + 1;
+      if (blank >= 0) rows[blank] = [...ids];
+      else rows.push([...ids]);
+      renderObservationRows(rows);
+      hideError();
+      message = `거극 복원 ${rowNumber}회차 자동 입력 완료`;
+    } else if (mode === "artian") {
+      const ids = detail.ids;
+      if (!Array.isArray(ids) || ids.length !== 5 || ids.some((id) => !Number.isInteger(id))) {
+        throw new Error("일반 아티어 복원 옵션 5개가 모두 필요합니다.");
+      }
+      const allowed = new Set(artianBasePool(
+        Number(artianBaseWeaponSelect.value),
+        currentArtianAttributeForce(),
+      ).ids);
+      if (ids.some((id) => !allowed.has(id))) {
+        throw new Error("현재 선택된 일반 아티어 무기 종류·속성과 맞지 않는 강화입니다. 제작 카운터 검색 탭의 무기 설정을 확인해 주세요.");
+      }
+      const rows = snapshotArtianObservationValues();
+      const blank = rows.findIndex((row) => row.every((id) => id === null));
+      rowNumber = blank >= 0 ? blank + 1 : rows.length + 1;
+      if (blank >= 0) rows[blank] = [...ids];
+      else rows.push([...ids]);
+      renderArtianObservationRows(rows);
+      clearArtianCounterSearchFeedback();
+      message = `일반 아티어 제작 ${rowNumber}회차 자동 입력 완료`;
+    } else if (mode === "skill") {
+      const { seriesIndex, groupIndex } = detail;
+      if (!Number.isInteger(seriesIndex) || !Number.isInteger(groupIndex)
+        || seriesIndex < 0 || seriesIndex >= SERIES_SKILLS.length
+        || groupIndex < 0 || groupIndex >= GROUP_SKILLS.length) {
+        throw new Error("시리즈 스킬과 그룹 스킬을 각각 하나씩 인식해야 합니다.");
+      }
+      const rows = [...skillObservationRows.querySelectorAll(".skill-observation-row")].map((row) => {
+        const series = row.querySelector('[data-skill-kind="series"]').value;
+        const group = row.querySelector('[data-skill-kind="group"]').value;
+        return {
+          seriesIndex: series === "" ? null : Number(series),
+          groupIndex: group === "" ? null : Number(group),
+        };
+      });
+      const blank = rows.findIndex((row) => row.seriesIndex === null && row.groupIndex === null);
+      rowNumber = blank >= 0 ? blank + 1 : rows.length + 1;
+      const value = { seriesIndex, groupIndex };
+      if (blank >= 0) rows[blank] = value;
+      else rows.push(value);
+      renderSkillObservationRows(rows);
+      resetSkillSearchFeedback();
+      message = `스킬 재부여 ${rowNumber}회차 자동 입력 완료`;
+    } else {
+      throw new Error("알 수 없는 화면 인식 모드입니다.");
+    }
+    success = true;
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  document.dispatchEvent(new CustomEvent("gogma:ocr-ack", {
+    detail: { success, message, rowNumber },
+  }));
+});
+
 updateBonusPoolNote();
 updateCounterRangeSummary();
 renderPredictionFilters();
