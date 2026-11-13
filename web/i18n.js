@@ -544,7 +544,7 @@ export function getLocale() {
   } catch {
     // Keep the site usable when storage is unavailable.
   }
-  return "ja";
+  return "ko";
 }
 
 export function t(source) {
@@ -721,7 +721,7 @@ function initializeLanguageSelector() {
     try {
       localStorage.setItem(LANGUAGE_STORAGE_KEY, selector.value);
     } catch {
-      // Reload still applies Japanese when storage is unavailable.
+      // Reload still applies the default Korean locale when storage is unavailable.
     }
     window.location.reload();
   });
