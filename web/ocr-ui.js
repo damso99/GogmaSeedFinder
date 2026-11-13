@@ -270,18 +270,30 @@ export function initializeOcrUi(doc = document) {
     if (status.dataset.state !== state) status.dataset.state = state;
   }
 
-  function resetReading() {
-    lastResult = null;
-    lastConfidence = 0;
-    displayedConfidence = 0;
+  function hasRecordedResult() {
+    return lastResult?.complete
+      && sequencers[lastResult.mode]?.alreadyApplied(lastResult.signature);
+  }
+
+  function resetReading({ keepRecognized = false } = {}) {
+    // Preprocessing changes and manual Retry must restart scanning, NOT erase
+    // a correctly recognized/recorded result or unlock the previous image.
+    const retained = keepRecognized && Boolean(lastResult?.complete);
+    if (!retained) {
+      lastResult = null;
+      lastConfidence = 0;
+      displayedConfidence = 0;
+      applyButton.disabled = true;
+      output.textContent = "—";
+      frameThrottle.reset();
+      currentFrame = null;
+    } else {
+      frameThrottle.retry();
+    }
     lastRejectedSignature = null;
     lastRejectedMessage = "";
-    frameThrottle.reset();
     frameStable.reset();
-    currentFrame = null;
-    applyButton.disabled = true;
-    output.textContent = "—";
-    setStatus(region ? translations.reading : translations.selectArea);
+    if (!retained) setStatus(region ? translations.reading : translations.selectArea);
   }
 
   function screenPoint(event, clamp = false) {
@@ -533,6 +545,9 @@ export function initializeOcrUi(doc = document) {
       const frame = snapshotRegion();
       if (!frame || !frameStable.observe(frame, (a, b) => frameDifference(a, b).changedRatio < 0.025)) return;
       if (!frameThrottle.shouldScan(frame)) return;
+      // An earlier confirmed game result must remain visible. Lighting noise
+      // is not a new restoration, even when Tesseract guesses different text.
+      if (hasRecordedResult() && !frameThrottle.canAdvance(frame)) return;
       currentFrame = frame;
       const image = captureRegion();
       if (!image) return;
@@ -610,7 +625,9 @@ export function initializeOcrUi(doc = document) {
       // alone must not make the same game screen look as if it changed.
       const savedResultOnScreen = lastResult?.complete
         && sequencers[lastResult.mode].alreadyApplied(lastResult.signature);
-      const holdSavedOutput = savedResultOnScreen && !readyToApply;
+      const confirmedVisualTransition = frameThrottle.canAdvance(currentFrame);
+      const holdSavedOutput = savedResultOnScreen
+        && (!readyToApply || !confirmedVisualTransition);
       const holdUnconfirmedChange = lastResult?.complete && result.complete
         && result.signature !== lastResult.signature && !readyToApply;
       const improvedPartial = !lastResult || result.recognized > lastResult.recognized
@@ -636,7 +653,8 @@ export function initializeOcrUi(doc = document) {
         && frameThrottle.canAdvance(currentFrame)) {
         applyResult(result);
       } else if (readyToApply && autoCheck.checked && lastConfidence >= MIN_AUTO_CONFIDENCE) {
-        setStatus(translations.visualWaiting);
+        // Keep the confirmation status and previously captured values visible.
+        if (!hasRecordedResult()) setStatus(translations.visualWaiting);
       } else if (readyToApply && autoCheck.checked && lastConfidence < MIN_AUTO_CONFIDENCE) {
         setStatus(`${translations.lowConfidence} (${Math.round(lastConfidence)}%)`);
       } else if (!readyToApply) {
@@ -650,7 +668,9 @@ export function initializeOcrUi(doc = document) {
         setStatus(translations.ready + result.labels.join(" / "));
       }
     } catch (error) {
-      if (epoch === session) setStatus(`${translations.failure} ${error?.message ?? ""}`, "error");
+      if (epoch === session && !hasRecordedResult()) {
+        setStatus(`${translations.failure} ${error?.message ?? ""}`, "error");
+      }
     } finally {
       running = false;
     }
@@ -660,7 +680,7 @@ export function initializeOcrUi(doc = document) {
     panel.hidden = false;
     paused = false;
     pauseButton.textContent = translations.pause;
-    resetReading();
+    resetReading({ keepRecognized: true });
     previewTimer = window.setInterval(drawPreview, PREVIEW_INTERVAL_MS);
     scanTimer = window.setInterval(() => { void scan(); }, OCR_INTERVAL_MS);
     drawPreview();
@@ -674,8 +694,8 @@ export function initializeOcrUi(doc = document) {
     previewTimer = null;
     scanTimer = null;
     running = false;
-    lastResult = null;
-    applyButton.disabled = true;
+    // Keep the last confirmed text in memory when the user reconnects the
+    // screen share. Only the video stream and OCR worker are released here.
     panel.hidden = true;
     if (workerPromise) {
       const pending = workerPromise;
@@ -693,12 +713,12 @@ export function initializeOcrUi(doc = document) {
   precisionCheck?.addEventListener("change", () => {
     session++;
     sequencers[modeSelect.value].clearPending();
-    resetReading();
+    resetReading({ keepRecognized: true });
   });
   processSelect.addEventListener("change", () => {
     session++;
     sequencers[modeSelect.value].clearPending();
-    resetReading();
+    resetReading({ keepRecognized: true });
   });
   autoCheck.addEventListener("change", () => {
     if (autoCheck.checked) setStatus(translations.reading);
@@ -714,7 +734,7 @@ export function initializeOcrUi(doc = document) {
   retryButton?.addEventListener("click", () => {
     session++;
     sequencers[modeSelect.value].clearPending();
-    resetReading();
+    resetReading({ keepRecognized: true });
   });
   pauseButton.addEventListener("click", () => {
     paused = !paused;
