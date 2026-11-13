@@ -1,10 +1,11 @@
 import { getLocale } from "./i18n.js";
 import { createOcrSequencer, parseOcrResult } from "./ocr-parser.js";
+import { createFrameThrottle } from "./ocr-frame.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1800;
 const PREVIEW_INTERVAL_MS = 180;
-const MIN_AUTO_CONFIDENCE = 35;
+const MIN_AUTO_CONFIDENCE = 42;
 const REGIONS_STORAGE_KEY = "gogma-ocr-regions-v1";
 
 const TEXT = {
@@ -33,7 +34,7 @@ const TEXT = {
     ready: "입력 준비 완료: ",
     waiting: "동일한 결과를 한 번 더 확인하는 중…",
     lowConfidence: "인식 신뢰도가 낮아 자동 입력을 보류했습니다. 결과를 확인하고 수동 입력하세요.",
-    duplicate: "현재 결과는 이미 입력됐습니다. 다음 결과 화면으로 이동하세요. 연속해서 동일한 결과가 나온 경우 수동 입력 버튼을 누를 수 있습니다.",
+    duplicate: "현재 결과는 이미 입력되어 있습니다. 같은 화면에서는 인식을 반복하거나 새 행을 추가하지 않습니다. 실제로 동일한 결과가 연속 출현했다면 수동 입력하세요.",
     paused: "인식이 일시정지되었습니다.",
     failure: "OCR 로딩 또는 인식에 실패했습니다. 인터넷 연결과 브라우저 설정을 확인해 주세요.",
     noResult: "선택된 영역에 해당 옵션이 없습니다. 새 결과 표시 영역만 다시 지정해 주세요.",
@@ -191,6 +192,12 @@ export function initializeOcrUi(doc = document) {
   const context = preview.getContext("2d", { willReadFrequently: false });
   const workCanvas = doc.createElement("canvas");
   const workContext = workCanvas.getContext("2d", { willReadFrequently: true });
+  // Inspect original pixels independently from unreliable OCR text.
+  const frameCanvas = doc.createElement("canvas");
+  frameCanvas.width = 192;
+  frameCanvas.height = 108;
+  const frameContext = frameCanvas.getContext("2d", { willReadFrequently: true });
+  const frameThrottle = createFrameThrottle({ maxScansPerView: 3 });
   const regions = getStoredRegions();
   const sequencers = {
     gogma: createOcrSequencer(),
@@ -209,13 +216,14 @@ export function initializeOcrUi(doc = document) {
   let lastConfidence = 0;
   let lastRejectedSignature = null;
   let lastRejectedMessage = "";
+  let currentFrame = null;
   let region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
   let pointerOrigin = null;
   let pointerRegion = null;
 
   function setStatus(text, state = "info") {
-    status.textContent = text;
-    status.dataset.state = state;
+    if (status.textContent !== text) status.textContent = text;
+    if (status.dataset.state !== state) status.dataset.state = state;
   }
 
   function resetReading() {
@@ -223,6 +231,8 @@ export function initializeOcrUi(doc = document) {
     lastConfidence = 0;
     lastRejectedSignature = null;
     lastRejectedMessage = "";
+    frameThrottle.reset();
+    currentFrame = null;
     applyButton.disabled = true;
     output.textContent = "—";
     setStatus(region ? translations.reading : translations.selectArea);
@@ -267,7 +277,7 @@ export function initializeOcrUi(doc = document) {
     region = chosen;
     regions[modeSelect.value] = chosen;
     try { localStorage.setItem(REGIONS_STORAGE_KEY, JSON.stringify(regions)); } catch {}
-    sequencers[modeSelect.value].reset();
+    sequencers[modeSelect.value].clearPending();
     session++;
     resetReading();
   });
@@ -300,7 +310,25 @@ export function initializeOcrUi(doc = document) {
     }
   }
 
-  function captureRegion() {
+  function snapshotRegion() {
+    if (!video?.videoWidth || !video.videoHeight || !validRegion(region)) return null;
+    const x = Math.floor(region.x * video.videoWidth);
+    const y = Math.floor(region.y * video.videoHeight);
+    const width = Math.min(video.videoWidth - x, Math.ceil(region.w * video.videoWidth));
+    const height = Math.min(video.videoHeight - y, Math.ceil(region.h * video.videoHeight));
+    if (width < 25 || height < 15) return null;
+    frameContext.drawImage(video, x, y, width, height, 0, 0, frameCanvas.width, frameCanvas.height);
+    const bytes = frameContext.getImageData(0, 0, frameCanvas.width, frameCanvas.height).data;
+    const frame = new Uint8Array(Math.floor(bytes.length / 4));
+    for (let i = 0; i < frame.length; i++) {
+      const p = i * 4;
+      frame[i] = Math.round(bytes[p] * 0.2126
+        + bytes[p + 1] * 0.7152 + bytes[p + 2] * 0.0722);
+    }
+    return frame;
+  }
+
+  function captureRegion(preprocess = processSelect.value) {
     if (!video?.videoWidth || !video.videoHeight || !validRegion(region)) return null;
     const left = Math.floor(region.x * video.videoWidth);
     const top = Math.floor(region.y * video.videoHeight);
@@ -312,10 +340,10 @@ export function initializeOcrUi(doc = document) {
     workCanvas.height = Math.round(height * scale);
     workContext.drawImage(video, left, top, width, height,
       0, 0, workCanvas.width, workCanvas.height);
-    if (processSelect.value !== "original") {
+    if (preprocess !== "original") {
       const frame = workContext.getImageData(0, 0, workCanvas.width, workCanvas.height);
       const data = frame.data;
-      const brightLetters = processSelect.value === "light";
+      const brightLetters = preprocess === "light";
       for (let index = 0; index < data.length; index += 4) {
         const brightness = data[index] * 0.2126 + data[index + 1] * 0.7152 + data[index + 2] * 0.0722;
         const textPixel = brightLetters ? brightness >= 151 : brightness <= 108;
@@ -363,6 +391,7 @@ export function initializeOcrUi(doc = document) {
     }
     if (reply.success) {
       sequencers[result.mode].applied(result);
+      frameThrottle.applied(currentFrame);
       lastRejectedSignature = null;
       lastRejectedMessage = "";
       setStatus(reply.message, "success");
@@ -449,7 +478,7 @@ export function initializeOcrUi(doc = document) {
   modeSelect.addEventListener("change", () => {
     session++;
     region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
-    sequencers[modeSelect.value].reset();
+    sequencers[modeSelect.value].clearPending();
     resetReading();
   });
   processSelect.addEventListener("change", () => {
@@ -464,7 +493,7 @@ export function initializeOcrUi(doc = document) {
     region = null;
     delete regions[modeSelect.value];
     try { localStorage.setItem(REGIONS_STORAGE_KEY, JSON.stringify(regions)); } catch {}
-    sequencers[modeSelect.value].reset();
+    sequencers[modeSelect.value].clearPending();
     resetReading();
   });
   pauseButton.addEventListener("click", () => {
@@ -481,7 +510,7 @@ export function initializeOcrUi(doc = document) {
     $(selector)?.addEventListener("change", () => {
       lastRejectedSignature = null;
       lastRejectedMessage = "";
-      sequencers[modeSelect.value].reset();
+      sequencers[modeSelect.value].clearPending();
     });
   }
   doc.addEventListener("gogma:screen-share-started", (event) => {
