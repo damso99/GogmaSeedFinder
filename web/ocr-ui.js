@@ -332,7 +332,7 @@ export function initializeOcrUi(doc = document) {
     if (!workerPromise) {
       workerPromise = loadTesseract(doc)
         .then(async (library) => {
-          const worker = await library.createWorker("kor+eng", 1);
+          const worker = await library.createWorker(["kor", "eng"], 1);
           await worker.setParameters({
             tessedit_pageseg_mode: library.PSM?.SINGLE_BLOCK ?? "6",
           });
