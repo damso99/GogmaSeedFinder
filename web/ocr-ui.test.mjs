@@ -13,6 +13,12 @@ const files = {
     .replace(/^export /gm, ""),
   image: readFileSync(new URL("./ocr-image.js", import.meta.url), "utf8")
     .replace(/^export /gm, ""),
+  geometry: readFileSync(new URL("./ocr-geometry.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
+  hud: readFileSync(new URL("./ocr-hud.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
+  lines: readFileSync(new URL("./ocr-lines.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
   ui: readFileSync(new URL("./ocr-ui.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
     .replace(/^export /gm, "")
@@ -25,11 +31,12 @@ function setup(initialText) {
     constructor(id) {
       this.id = id;
       this.dataset = {};
+      this.style = {};
       this.listeners = new Map();
       this.disabled = false;
       this.hidden = false;
       this.checked = id === "ocr-auto";
-      this.value = id === "ocr-mode" ? "gogma" : id === "ocr-preprocess" ? "enhanced" : "";
+      this.value = id === "ocr-mode" ? "gogma" : id === "ocr-preprocess" ? "enhanced" : id === "ocr-preview-zoom" ? "1" : "";
       this.textContent = "";
       this.width = 960;
       this.height = 540;
@@ -70,7 +77,7 @@ function setup(initialText) {
   }
   const names = [
     "ocr-panel", "ocr-preview", "ocr-mode", "ocr-preprocess", "ocr-auto",
-    "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
+    "ocr-preview-zoom", "ocr-precision", "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
     "ocr-recognized", "weapon-type", "attribute-force", "artian-search-weapon-type",
     "artian-search-attribute-force",
   ];
@@ -82,6 +89,7 @@ function setup(initialText) {
   doc.head = { append() {} };
 
   let text = initialText;
+  let nextReadings = [];
   let recognitionCount = 0;
   let workersTerminated = 0;
   const library = {
@@ -92,7 +100,10 @@ function setup(initialText) {
         setParameters: async () => {},
         recognize: async () => {
           recognitionCount++;
-          return { data: { text, confidence: 92 } };
+          const reading = nextReadings.length
+            ? nextReadings.shift()
+            : { text, confidence: 92 };
+          return { data: { text: reading.text, confidence: reading.confidence ?? 92 } };
         },
         terminate: async () => { workersTerminated++; },
       };
@@ -125,6 +136,9 @@ function setup(initialText) {
   vm.runInContext(files.parser, context);
   vm.runInContext(files.frame, context);
   vm.runInContext(files.image, context);
+  vm.runInContext(files.geometry, context);
+  vm.runInContext(files.hud, context);
+  vm.runInContext(files.lines, context);
   vm.runInContext(files.ui, context);
   const ui = vm.runInContext("initializeOcrUi(document)", context);
   const observed = [];
@@ -139,6 +153,7 @@ function setup(initialText) {
   return {
     nodes, doc, ui, observed, video, CustomEvent,
     setText(value) { text = value; },
+    setReadings(value) { nextReadings = [...value]; },
     setFrame(value) { frameLevel = value; },
     getRecognitionCount: () => recognitionCount,
     getWorkersTerminated: () => workersTerminated,
@@ -150,6 +165,8 @@ test("stable Korean result auto-fills the existing Gogma observation event once"
     "기초 공격력 강화Ⅱ", "기초 공격력 강화Ⅲ", "회심률 강화Ⅱ",
     "기초 공격력 강화 EX", "예리도 강화 EX",
   ].join("\n"));
+  await s.ui.scan();
+  assert.equal(s.observed.length, 0);
   await s.ui.scan();
   assert.equal(s.observed.length, 0);
   await s.ui.scan();
@@ -171,6 +188,7 @@ test("OCR can switch to a base Artian result without overriding Gogma observatio
   s.setText("기초 공격력 강화\n속성 강화\n예리도 강화\n회심률 강화\n기초 공격력 강화");
   await s.ui.scan();
   await s.ui.scan();
+  await s.ui.scan();
   assert.equal(s.observed.length, 1);
   assert.equal(s.observed[0].mode, "artian");
   assert.deepEqual([...s.observed[0].ids], [4, 6, 7, 8, 4]);
@@ -182,8 +200,10 @@ test("pausing recognition prevents automatic input", async () => {
   s.nodes["ocr-toggle-pause"].click();
   await s.ui.scan();
   await s.ui.scan();
+  await s.ui.scan();
   assert.equal(s.getRecognitionCount(), 0);
   s.nodes["ocr-toggle-pause"].click();
+  await s.ui.scan();
   await s.ui.scan();
   await s.ui.scan();
   assert.equal(s.observed.length, 1);
@@ -193,6 +213,7 @@ test("pausing recognition prevents automatic input", async () => {
 test("the same physical screen does not keep refreshing OCR output", async () => {
   const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
   const s = setup(text);
+  await s.ui.scan();
   await s.ui.scan();
   await s.ui.scan();
   const savedOutput = s.nodes["ocr-recognized"].textContent;
@@ -212,9 +233,11 @@ test("an unstable OCR pass cannot append the previous roll after a changed frame
   const s = setup(text);
   await s.ui.scan();
   await s.ui.scan();
+  await s.ui.scan();
   assert.equal(s.observed.length, 1);
   s.setFrame(160);
   s.setText("오류\n문자\n강화");
+  await s.ui.scan();
   await s.ui.scan();
   await s.ui.scan();
   s.setFrame(0);
@@ -228,8 +251,10 @@ test("a genuinely changed result automatically enters the next observation row",
   const s = setup("기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX");
   await s.ui.scan();
   await s.ui.scan();
+  await s.ui.scan();
   s.setFrame(160);
   s.setText("회심률 강화Ⅲ\n기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅱ\n회심률 강화 EX\n예리도 강화");
+  await s.ui.scan();
   await s.ui.scan();
   await s.ui.scan();
   assert.equal(s.observed.length, 2);
@@ -244,8 +269,10 @@ test("retry on an unchanged frame cannot automatically insert an identical roll"
   const s = setup(text);
   await s.ui.scan();
   await s.ui.scan();
+  await s.ui.scan();
   assert.equal(s.observed.length, 1);
   s.nodes["ocr-retry"].click();
+  await s.ui.scan();
   await s.ui.scan();
   await s.ui.scan();
   assert.equal(s.observed.length, 1);
@@ -257,11 +284,13 @@ test("the last saved text stays visible during an unconfirmed new OCR reading", 
   const s = setup(text);
   await s.ui.scan();
   await s.ui.scan();
+  await s.ui.scan();
   const saved = s.nodes["ocr-recognized"].textContent;
   s.setFrame(170);
   s.setText("회심률 강화Ⅲ\n기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅱ\n회심률 강화 EX\n예리도 강화");
   await s.ui.scan();
   assert.equal(s.nodes["ocr-recognized"].textContent, saved);
+  await s.ui.scan();
   await s.ui.scan();
   assert.notEqual(s.nodes["ocr-recognized"].textContent, saved);
   assert.equal(s.observed.length, 2);
@@ -273,7 +302,37 @@ test("enhanced crop is selected by default and still records a complete Korean r
   assert.equal(s.nodes["ocr-preprocess"].value, "enhanced");
   await s.ui.scan();
   await s.ui.scan();
+  await s.ui.scan();
   assert.equal(s.observed.length, 1);
   assert.deepEqual([...s.observed[0].ids], [8, 12, 9, 15, 10]);
+  s.ui.stop();
+});
+
+test("preview zoom preserves the selected crop and avoids object-fit offset", () => {
+  const s = setup("기초 공격력 강화Ⅱ");
+  s.nodes["ocr-preview-zoom"].value = "2";
+  s.nodes["ocr-preview-zoom"].dispatchEvent({type:"change"});
+  assert.equal(s.nodes["ocr-preview"].style.width,"200%");
+  s.nodes["ocr-preview"].dispatchEvent({type:"pointerdown",button:0,clientX:200,clientY:100,pointerId:1});
+  s.nodes["ocr-preview"].dispatchEvent({type:"pointermove",clientX:500,clientY:320,pointerId:1});
+  s.nodes["ocr-preview"].dispatchEvent({type:"pointerup",clientX:500,clientY:320,pointerId:1});
+  assert.equal(s.nodes["ocr-status"].dataset.state,"info");
+  s.ui.stop();
+});
+
+test("adaptive background pass can rescue otherwise unreadable bonus rows", async () => {
+  const valid = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const bad = "노이즈\n복원 정보 누락";
+  const s = setup(bad);
+  s.setReadings([
+    { text: bad, confidence: 12 }, { text: bad, confidence: 18 }, { text: valid, confidence: 84 },
+    { text: bad, confidence: 12 }, { text: bad, confidence: 18 }, { text: valid, confidence: 84 },
+  ]);
+  await s.ui.scan();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  assert.deepEqual([...s.observed[0].ids], [8, 12, 9, 15, 10]);
+  assert.equal(s.getRecognitionCount(), 6);
   s.ui.stop();
 });

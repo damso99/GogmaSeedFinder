@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ocrRenderSize, enhanceOcrImageData, bestOcrCandidate } from "./ocr-image.js";
+import { ocrRenderSize, enhanceOcrImageData, removeVariableBackground, bestOcrCandidate } from "./ocr-image.js";
 
 test("small OCR crop gets up to 3x enlargement and a white margin", () => {
   const size = ocrRenderSize(320, 180);
@@ -56,4 +56,26 @@ test("between two complete readings prefer higher confidence", () => {
   const left = { result: { complete: true, recognized: 5 }, confidence: 57 };
   const right = { result: { complete: true, recognized: 5 }, confidence: 81 };
   assert.equal(bestOcrCandidate(left, right), right);
+});
+
+test("local background subtraction retains bright Korean glyphs despite changing game lighting", () => {
+  const width = 96, height = 48;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const brightText = x >= 36 && x < 46 && y >= 17 && y < 30;
+    const pixel = Math.min(255, 40 + x * 0.55 + y * 0.5 + (brightText ? 120 : 0));
+    const p = (y * width + x) * 4;
+    data[p] = data[p + 1] = data[p + 2] = pixel;
+    data[p + 3] = 255;
+  }
+  removeVariableBackground({ width, height, data });
+  const bg = data[(6 * width + 6) * 4];
+  const glyph = data[(24 * width + 40) * 4];
+  assert.ok(bg > 235, "smoothly changing background should be removed");
+  assert.ok(glyph < 90, "the text stroke must remain dark on white");
+});
+
+test("background suppression safely ignores incomplete image buffers", () => {
+  const bad = { width: 50, height: 50, data: new Uint8ClampedArray(12) };
+  assert.equal(removeVariableBackground(bad), bad);
 });

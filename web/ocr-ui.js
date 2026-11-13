@@ -1,10 +1,14 @@
 import { getLocale } from "./i18n.js";
 import { createOcrSequencer, parseOcrResult } from "./ocr-parser.js";
 import { createFrameThrottle } from "./ocr-frame.js";
-import { ocrRenderSize, enhanceOcrImageData, bestOcrCandidate } from "./ocr-image.js";
+import { ocrRenderSize, enhanceOcrImageData, removeVariableBackground, bestOcrCandidate } from "./ocr-image.js";
+import { pointerToCanvasImage } from "./ocr-geometry.js";
+import { buildHudFingerprint, stabilizeTransition } from "./ocr-hud.js";
+import { frameDifference } from "./ocr-frame.js";
+import { recognizeResultRows } from "./ocr-lines.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
-const OCR_INTERVAL_MS = 1800;
+const OCR_INTERVAL_MS = 1200;
 const PREVIEW_INTERVAL_MS = 180;
 const MIN_AUTO_CONFIDENCE = 42;
 const REGIONS_STORAGE_KEY = "gogma-ocr-regions-v1";
@@ -14,6 +18,9 @@ const TEXT = {
     heading: "복원 결과 자동 입력",
     description: "인식할 신규 옵션 5줄(스킬은 2줄)만 게임 화면에서 드래그해 선택하세요.",
     modeLabel: "인식 대상",
+    zoomLabel: "인식 영역 확대",
+    zoomFit: "화면에 맞춤",
+    precision: "정밀 분석 (옵션 5줄 각각 인식, 느림)",
     gogma: "거극 아티어 복원",
     artian: "일반 아티어 복원",
     skill: "스킬 재부여",
@@ -23,6 +30,7 @@ const TEXT = {
     dark: "밝은 배경 · 어두운 글자",
     original: "원본 인식",
     enhanced: "선명하게 보정 (권장)",
+    adaptive: "배경색 제거 (장면 변화에 강함)",
     enhancedPreview: "OCR에 전달되는 보정 이미지 확인",
     resetArea: "영역 다시 지정",
     retry: "다시 인식",
@@ -49,6 +57,9 @@ const TEXT = {
     heading: "Auto-fill from game screen",
     description: "Drag a region containing only the five new bonus lines (two for skills).",
     modeLabel: "Recognition target",
+    zoomLabel: "Preview zoom",
+    zoomFit: "Fit width",
+    precision: "Precise reading (individual rows, slower)",
     gogma: "Gogma reinforcement",
     artian: "Base Artian reinforcement",
     skill: "Skill reset",
@@ -58,6 +69,7 @@ const TEXT = {
     dark: "Light background · dark text",
     original: "Original image",
     enhanced: "Enhanced clarity (recommended)",
+    adaptive: "Remove game background",
     enhancedPreview: "Preview processed OCR image",
     resetArea: "Reselect region",
     retry: "Read again",
@@ -84,6 +96,9 @@ const TEXT = {
     heading: "画面から結果を自動入力",
     description: "新しい結果の5項目（スキルは2項目）だけをドラッグして選択してください。",
     modeLabel: "認識対象",
+    zoomLabel: "プレビュー拡大",
+    zoomFit: "幅に合わせる",
+    precision: "精密認識 (各行を読み取る・低速)",
     gogma: "巨戟アーティア復元",
     artian: "通常アーティア復元",
     skill: "スキル再付与",
@@ -93,6 +108,7 @@ const TEXT = {
     dark: "明るい背景・暗い文字",
     original: "画像のまま",
     enhanced: "鮮明化（推奨）",
+    adaptive: "ゲーム背景を除去",
     enhancedPreview: "OCR画像を確認",
     resetArea: "範囲を再選択",
     retry: "もう一度認識",
@@ -119,6 +135,9 @@ const TEXT = {
     heading: "遊戲畫面自動填入",
     description: "拖曳並選取只有五項新加成（技能為兩項）的區域。",
     modeLabel: "辨識目標",
+    zoomLabel: "預覽放大",
+    zoomFit: "符合寬度",
+    precision: "精確辨識 (逐行，速度較慢)",
     gogma: "巨戟機械武器復原",
     artian: "一般機械武器復原",
     skill: "技能重新附加",
@@ -128,6 +147,7 @@ const TEXT = {
     dark: "淺色背景·深色文字",
     original: "原始影像",
     enhanced: "強化清晰度（建議）",
+    adaptive: "去除遊戲背景",
     enhancedPreview: "檢視增強影像",
     resetArea: "重新選取區域",
     retry: "重新辨識",
@@ -194,6 +214,8 @@ export function initializeOcrUi(doc = document) {
   if (!panel || !preview) return null;
   const modeSelect = $("#ocr-mode");
   const processSelect = $("#ocr-preprocess");
+  const zoomSelect = $("#ocr-preview-zoom");
+  const precisionCheck = $("#ocr-precision");
   const autoCheck = $("#ocr-auto");
   const resetButton = $("#ocr-reset-area");
   const retryButton = $("#ocr-retry");
@@ -218,6 +240,7 @@ export function initializeOcrUi(doc = document) {
   frameCanvas.height = 108;
   const frameContext = frameCanvas.getContext("2d", { willReadFrequently: true });
   const frameThrottle = createFrameThrottle({ maxScansPerView: 3 });
+  const frameStable = stabilizeTransition({ stableFrames: 2 });
   const regions = getStoredRegions();
   const sequencers = {
     gogma: createOcrSequencer(),
@@ -254,19 +277,25 @@ export function initializeOcrUi(doc = document) {
     lastRejectedSignature = null;
     lastRejectedMessage = "";
     frameThrottle.reset();
+    frameStable.reset();
     currentFrame = null;
     applyButton.disabled = true;
     output.textContent = "—";
     setStatus(region ? translations.reading : translations.selectArea);
   }
 
-  function screenPoint(event) {
-    const rect = preview.getBoundingClientRect();
-    return {
-      x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
-    };
+  function screenPoint(event, clamp = false) {
+    // The image is drawn in its original aspect ratio, but 'contain' can
+    // introduce invisible letterbox areas in constrained layouts.
+    return pointerToCanvasImage(
+      event, preview.getBoundingClientRect(), preview.width, preview.height,
+      { fit: "contain", clamp },
+    );
   }
+  zoomSelect?.addEventListener("change", () => {
+    const value = Number(zoomSelect.value);
+    preview.style.width = value === 1.5 ? "150%" : value === 2 ? "200%" : "100%";
+  });
 
   function selectionFromCorners(a, b) {
     return {
@@ -280,16 +309,21 @@ export function initializeOcrUi(doc = document) {
   preview.addEventListener("pointerdown", (event) => {
     if (!video || event.button !== 0) return;
     pointerOrigin = screenPoint(event);
+    if (!pointerOrigin) return;
     pointerRegion = null;
     preview.setPointerCapture?.(event.pointerId);
   });
   preview.addEventListener("pointermove", (event) => {
     if (!pointerOrigin) return;
-    pointerRegion = selectionFromCorners(pointerOrigin, screenPoint(event));
+    const point = screenPoint(event, true);
+    if (!point) return;
+    pointerRegion = selectionFromCorners(pointerOrigin, point);
+    drawPreview();
   });
   preview.addEventListener("pointerup", (event) => {
     if (!pointerOrigin) return;
-    const chosen = selectionFromCorners(pointerOrigin, screenPoint(event));
+    const point = screenPoint(event, true);
+    const chosen = point ? selectionFromCorners(pointerOrigin, point) : null;
     pointerOrigin = null;
     pointerRegion = null;
     if (!validRegion(chosen)) {
@@ -310,10 +344,11 @@ export function initializeOcrUi(doc = document) {
 
   function drawPreview() {
     if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
-    const h = Math.max(160, Math.round(960 * video.videoHeight / video.videoWidth));
-    if (preview.width !== 960 || preview.height !== h) {
-      preview.width = 960;
-      preview.height = h;
+    const width = Math.min(video.videoWidth, 1920);
+    const height = Math.round(width * video.videoHeight / video.videoWidth);
+    if (preview.width !== width || preview.height !== height) {
+      preview.width = width;
+      preview.height = height;
     }
     context.drawImage(video, 0, 0, preview.width, preview.height);
     const area = pointerRegion ?? region;
@@ -341,6 +376,12 @@ export function initializeOcrUi(doc = document) {
     if (width < 25 || height < 15) return null;
     frameContext.drawImage(video, x, y, width, height, 0, 0, frameCanvas.width, frameCanvas.height);
     const bytes = frameContext.getImageData(0, 0, frameCanvas.width, frameCanvas.height).data;
+    // Ignore global lighting shifts: monitor the geometry of the text strokes
+    // and UI outlines rather than the raw color/brightness of the background.
+    const fingerprint = buildHudFingerprint({
+      data: bytes, width: frameCanvas.width, height: frameCanvas.height,
+    });
+    if (fingerprint) return fingerprint;
     const frame = new Uint8Array(Math.floor(bytes.length / 4));
     for (let i = 0; i < frame.length; i++) {
       const p = i * 4;
@@ -372,9 +413,10 @@ export function initializeOcrUi(doc = document) {
     workContext.drawImage(video, left, top, width, height,
       padding, padding, renderedWidth, renderedHeight);
 
-    if (preprocess === "enhanced") {
+    if (preprocess === "enhanced" || preprocess === "adaptive") {
       const image = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
-      enhanceOcrImageData(image);
+      if (preprocess === "adaptive") removeVariableBackground(image);
+      else enhanceOcrImageData(image);
       workContext.putImageData(image, padding, padding);
     } else if (preprocess === "light" || preprocess === "dark") {
       const frame = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
@@ -489,7 +531,8 @@ export function initializeOcrUi(doc = document) {
       const worker = await getWorker();
       if (epoch !== session || !video) return;
       const frame = snapshotRegion();
-      if (!frame || !frameThrottle.shouldScan(frame)) return;
+      if (!frame || !frameStable.observe(frame, (a, b) => frameDifference(a, b).changedRatio < 0.025)) return;
+      if (!frameThrottle.shouldScan(frame)) return;
       currentFrame = frame;
       const image = captureRegion();
       if (!image) return;
@@ -515,6 +558,47 @@ export function initializeOcrUi(doc = document) {
           if (winner.result === secondaryResult) {
             chosen = secondary;
             result = secondaryResult;
+          }
+        }
+      }
+      // The alternative full-block preprocessing can still fail when a
+      // bright moving background shines through the translucent game panel.
+      // Try local illumination subtraction once before per-row OCR.
+      if (!result.complete || (Number(chosen?.data?.confidence) || 0) < MIN_AUTO_CONFIDENCE) {
+        const backgroundImage = captureRegion("adaptive");
+        if (backgroundImage) {
+          const backgroundRead = await worker.recognize(backgroundImage);
+          if (epoch !== session || !video) return;
+          const backgroundResult = parseOcrResult(modeSelect.value, backgroundRead?.data?.text ?? "");
+          const backgroundConfidence = Number(backgroundRead?.data?.confidence) || 0;
+          const winner = bestOcrCandidate(
+            { result, confidence: Number(chosen?.data?.confidence) || 0 },
+            { result: backgroundResult, confidence: backgroundConfidence },
+          );
+          if (winner.result === backgroundResult) {
+            chosen = backgroundRead;
+            result = backgroundResult;
+          }
+        }
+      }
+      // Optional slow fallback: read each game bonus row separately.
+      // The crop must contain exactly five option rows (two skill rows).
+      if (precisionCheck?.checked && !result.complete) {
+        const stripImage = captureRegion("enhanced");
+        if (stripImage) {
+          const precise = await recognizeResultRows(worker, doc, stripImage, modeSelect.value);
+          if (epoch !== session || !video) return;
+          if (precise) {
+            const preciseResult = parseOcrResult(modeSelect.value, precise.data.text);
+            const preciseConfidence = Number(precise.data.confidence) || 0;
+            const winner = bestOcrCandidate(
+              { result, confidence: Number(chosen?.data?.confidence) || 0 },
+              { result: preciseResult, confidence: preciseConfidence },
+            );
+            if (winner.result === preciseResult) {
+              chosen = precise;
+              result = preciseResult;
+            }
           }
         }
       }
@@ -603,6 +687,11 @@ export function initializeOcrUi(doc = document) {
   modeSelect.addEventListener("change", () => {
     session++;
     region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
+    sequencers[modeSelect.value].clearPending();
+    resetReading();
+  });
+  precisionCheck?.addEventListener("change", () => {
+    session++;
     sequencers[modeSelect.value].clearPending();
     resetReading();
   });

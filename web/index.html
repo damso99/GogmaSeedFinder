@@ -69,8 +69,22 @@
               <option value="light" data-ocr-text="light">어두운 배경 · 밝은 글자</option>
               <option value="dark" data-ocr-text="dark">밝은 배경 · 어두운 글자</option>
               <option value="enhanced" data-ocr-text="enhanced" selected>선명하게 보정 (권장)</option>
+              <option value="adaptive" data-ocr-text="adaptive">배경색 제거 (장면 변화에 강함)</option>
               <option value="original" data-ocr-text="original">원본 인식</option>
             </select>
+          </label>
+        </div>
+        <div class="ocr-capture-settings">
+          <label class="ocr-mode-field">
+            <span data-ocr-text="zoomLabel">화면 확대</span>
+            <select id="ocr-preview-zoom">
+              <option value="1" data-ocr-text="zoomFit" selected>기본 크기</option>
+              <option value="1.5">150%</option>
+              <option value="2">200%</option>
+            </select>
+          </label>
+          <label class="ocr-checkbox"><input type="checkbox" id="ocr-precision" />
+            <span data-ocr-text="precision">정밀 인식 (5줄 각각 분석, 느림)</span>
           </label>
         </div>
         <div class="ocr-preview-frame">
