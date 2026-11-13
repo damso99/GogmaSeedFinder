@@ -29,6 +29,22 @@
         </label>
       </header>
 
+      <section class="capture-panel" aria-labelledby="capture-title">
+        <div class="capture-panel-copy">
+          <p class="step">SCREEN CAPTURE</p>
+          <h2 id="capture-title" data-capture-copy="title">실시간 화면 공유</h2>
+          <p data-capture-copy="description">게임 화면을 연결합니다. OCR 자동 입력은 다음 단계에서 추가됩니다.</p>
+        </div>
+        <div class="capture-panel-controls">
+          <span id="capture-status" class="capture-status" data-capture-copy="idle" role="status" aria-live="polite">연결되지 않음</span>
+          <div class="capture-buttons">
+            <button id="capture-start" type="button" class="primary" data-capture-copy="start">화면 공유 시작</button>
+            <button id="capture-stop" type="button" class="secondary" data-capture-copy="stop" disabled>공유 종료</button>
+          </div>
+        </div>
+        <video id="capture-video" muted playsinline hidden aria-hidden="true"></video>
+      </section>
+
       <section class="save-state-panel" aria-labelledby="save-state-title">
         <div class="save-state-heading">
           <div>
@@ -505,6 +521,23 @@
         <p>不具合や分かりにくい点があれば、<a href="https://github.com/apeshinzo78/GogmaSeedFinder/issues" target="_blank" rel="noreferrer">GitHub Issues</a> でお知らせください。</p>
       </footer>
     </main>
+    <dialog id="capture-guide" class="capture-guide-dialog" aria-labelledby="capture-guide-title" aria-describedby="capture-guide-intro">
+      <div class="capture-guide-body">
+        <p class="step">BEFORE SHARING</p>
+        <h2 id="capture-guide-title" data-capture-copy="guideTitle">게임을 테두리 없는 창 모드로 변경해 주세요</h2>
+        <p id="capture-guide-intro" data-capture-copy="guideIntro">화면 공유 전 몬스터헌터 와일즈의 화면 표시 모드를 ‘테두리 없는 창(보더리스)’으로 변경해 주세요.</p>
+        <ol class="capture-guide-steps">
+          <li data-capture-copy="guideStep1">게임 설정에서 화면 모드를 ‘테두리 없는 창’으로 변경</li>
+          <li data-capture-copy="guideStep2">게임 화면이 정상적으로 표시되는지 확인</li>
+          <li data-capture-copy="guideStep3">아래 버튼을 누르고 공유할 게임 창 또는 모니터를 선택</li>
+        </ol>
+        <p class="capture-guide-note" data-capture-copy="guideNote">브라우저에서는 게임의 화면 모드를 자동으로 변경할 수 없습니다.</p>
+        <div class="capture-guide-actions">
+          <button id="capture-guide-cancel" class="secondary" type="button" data-capture-copy="cancel">취소</button>
+          <button id="capture-guide-confirm" class="primary" type="button" data-capture-copy="confirm">설정 확인 · 화면 선택</button>
+        </div>
+      </div>
+    </dialog>
     <aside id="save-feedback" class="save-feedback" role="status" aria-live="polite" aria-atomic="true" hidden>
       <div class="save-feedback-icon" aria-hidden="true">✓</div>
       <div class="save-feedback-copy">
@@ -514,5 +547,6 @@
       <button id="close-save-feedback" class="save-feedback-close" type="button" aria-label="通知を閉じる">×</button>
     </aside>
     <script type="module" src="./app.js?v=__BUILD_ID__"></script>
+    <script type="module" src="./screen-capture.js?v=__BUILD_ID__"></script>
   </body>
 </html>
