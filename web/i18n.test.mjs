@@ -28,7 +28,7 @@ function translator(locale) {
   });
   // Run the browser module with a minimal DOM; retain its initialization and observer.
   vm.runInContext(koSource.replace(/^export /gm, ""), context);
-  vm.runInContext(i18nSource.replace(/^import .*;\\n/gm, "").replace(/^export /gm, ""), context);
+  vm.runInContext(i18nSource.replace(/^import .*;\n/gm, "").replace(/^export /gm, ""), context);
   return { context, t: context.t, observe: (node) => observerCallback([{ addedNodes: [node] }]) };
 }
 
