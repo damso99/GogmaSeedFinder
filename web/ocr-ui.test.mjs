@@ -11,6 +11,8 @@ const files = {
     .replace(/^export /gm, ""),
   frame: readFileSync(new URL("./ocr-frame.js", import.meta.url), "utf8")
     .replace(/^export /gm, ""),
+  image: readFileSync(new URL("./ocr-image.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
   ui: readFileSync(new URL("./ocr-ui.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
     .replace(/^export /gm, "")
@@ -27,7 +29,7 @@ function setup(initialText) {
       this.disabled = false;
       this.hidden = false;
       this.checked = id === "ocr-auto";
-      this.value = id === "ocr-mode" ? "gogma" : id === "ocr-preprocess" ? "original" : "";
+      this.value = id === "ocr-mode" ? "gogma" : id === "ocr-preprocess" ? "enhanced" : "";
       this.textContent = "";
       this.width = 960;
       this.height = 540;
@@ -122,6 +124,7 @@ function setup(initialText) {
   vm.runInContext(files.korean, context);
   vm.runInContext(files.parser, context);
   vm.runInContext(files.frame, context);
+  vm.runInContext(files.image, context);
   vm.runInContext(files.ui, context);
   const ui = vm.runInContext("initializeOcrUi(document)", context);
   const observed = [];
@@ -262,5 +265,15 @@ test("the last saved text stays visible during an unconfirmed new OCR reading", 
   await s.ui.scan();
   assert.notEqual(s.nodes["ocr-recognized"].textContent, saved);
   assert.equal(s.observed.length, 2);
+  s.ui.stop();
+});
+
+test("enhanced crop is selected by default and still records a complete Korean result", async () => {
+  const s = setup("기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX");
+  assert.equal(s.nodes["ocr-preprocess"].value, "enhanced");
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  assert.deepEqual([...s.observed[0].ids], [8, 12, 9, 15, 10]);
   s.ui.stop();
 });
