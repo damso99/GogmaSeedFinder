@@ -110,27 +110,21 @@ export function parseOcrResult(mode, text) {
   };
 }
 
-// A roll is applied only after two identical successful OCR passes. The same
-// visible result cannot be appended repeatedly; a different stable result
-// can be appended immediately. An identical result requires the result screen
-// to disappear for several passes (or the user's manual apply action).
-export function createOcrSequencer({ stablePasses = 2, missingPasses = 3 } = {}) {
+// OCR can fail transiently while showing the very same roll. An incomplete
+// reading must NEVER rearm an already-recorded result: only a different,
+// stable result, or an explicit manual entry, may create the next row.
+export function createOcrSequencer({ stablePasses = 2 } = {}) {
   let pending = null;
   let pendingCount = 0;
   let lastApplied = null;
-  let missingCount = 0;
-  let rearmed = false;
 
   return {
     observe(result) {
       if (!result?.complete || !result.signature) {
         pending = null;
         pendingCount = 0;
-        missingCount++;
-        if (missingCount >= missingPasses) rearmed = true;
         return false;
       }
-      missingCount = 0;
       if (result.signature !== pending) {
         pending = result.signature;
         pendingCount = 1;
@@ -138,25 +132,22 @@ export function createOcrSequencer({ stablePasses = 2, missingPasses = 3 } = {})
         pendingCount++;
       }
       if (pendingCount < stablePasses) return false;
-      if (lastApplied === result.signature && !rearmed) return false;
-      return true;
+      // Repeated rolls can be deliberately added with the manual button,
+      // but noisy intermediate OCR must never cause an automatic duplicate.
+      return lastApplied !== result.signature;
     },
     applied(result) {
       lastApplied = result.signature;
       pending = result.signature;
       pendingCount = 0;
-      missingCount = 0;
-      rearmed = false;
     },
     alreadyApplied(signature) {
-      return signature === lastApplied && !rearmed;
+      return signature === lastApplied;
     },
     reset() {
       pending = null;
       pendingCount = 0;
       lastApplied = null;
-      missingCount = 0;
-      rearmed = false;
     },
   };
 }
