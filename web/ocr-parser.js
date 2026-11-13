@@ -148,6 +148,9 @@ export function createOcrSequencer({ stablePasses = 2, missingPasses = 3 } = {})
       missingCount = 0;
       rearmed = false;
     },
+    alreadyApplied(signature) {
+      return signature === lastApplied && !rearmed;
+    },
     reset() {
       pending = null;
       pendingCount = 0;
