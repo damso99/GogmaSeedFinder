@@ -163,6 +163,8 @@ test("stable Korean result auto-fills the existing Gogma observation event once"
   await s.ui.scan();
   assert.equal(s.observed.length, 0);
   await s.ui.scan();
+  assert.equal(s.observed.length, 0);
+  await s.ui.scan();
   assert.equal(s.observed.length, 1);
   assert.deepEqual([...s.observed[0].ids], [8, 12, 9, 15, 10]);
   await s.ui.scan();
