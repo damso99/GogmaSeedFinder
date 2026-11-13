@@ -553,5 +553,78 @@ export function translateKoreanTemplate(source) {
   if ((match = source.match(/^スキルカウンター ([\d,]+) を特定$/))) return `스킬 카운터 ${match[1]} 확인`;
   if ((match = source.match(/^(\d+)\/3 特定済み$/))) return `3개 중 ${match[1]}개 확인`;
   if (source === "3値を特定済み") return "3개 값 모두 확인";
+
+  if ((match = source.match(/^([\d,]+)〜([\d,]+) \/ ([\d,]+)件$/))) return `${match[1]}~${match[2]} / 전체 ${match[3]}개`;
+  if ((match = source.match(/^復元([\d,]+)$/))) return `복원 ${match[1]}`;
+  if ((match = source.match(/^スキル([\d,]+)$/))) return `스킬 ${match[1]}`;
+  if ((match = source.match(/^検索範囲内の([\d,]+)行をCSVへ出力します。$/))) return `검색 범위의 ${match[1]}행을 CSV로 내보냅니다.`;
+  if ((match = source.match(/^EX条件に合う([\d,]+)行をCSVへ出力します。$/))) return `EX 조건에 맞는 ${match[1]}행을 CSV로 내보냅니다.`;
+  if ((match = source.match(/^条件に合う([\d,]+)行をCSVへ出力します。$/))) return `조건에 맞는 ${match[1]}행을 CSV로 내보냅니다.`;
+  if ((match = source.match(/^(EX厳選・)?([\d,]+)(条件|武器) × ([\d,]+)回(?:・EX(\d+)個以上 ([\d,]+)行)?$/))) {
+    const prefix = match[1] ? "EX 엄선 · " : "";
+    const unit = match[3] === "武器" ? "무기" : "조건";
+    const suffix = match[5] === undefined ? "" : ` · EX ${match[5]}개 이상 ${match[6]}행`;
+    return `${prefix}${match[2]}개 ${unit} × ${match[4]}회${suffix}`;
+  }
+  if ((match = source.match(/^EXが(\d+)個以上の結果は表示範囲内にありません。表示回数を増やすか最低EX数を下げてください。$/))) return `표시 범위에 EX ${match[1]}개 이상인 결과가 없습니다. 횟수를 늘리거나 최소 EX 개수를 낮춰 주세요.`;
+  if ((match = source.match(/^([\d,]+)\/([\d,]+)件$/))) return `${match[1]}/${match[2]}개 대상`;
+  if ((match = source.match(/^([\d,]+)件・基準seedと復元カウンター待ち$/))) return `${match[1]}개 대상 · 기준 시드와 복원 카운터 대기 중`;
+  if ((match = source.match(/^(\d+)\/(\d+) 武器の構成入力済み$/))) return `무기 구성 ${match[1]}/${match[2]}개 입력 완료`;
+  if ((match = source.match(/^([\d,]+)条件$/))) return `${match[1]}개 조건`;
+  if ((match = source.match(/^([\d,]+)件 × ([\d,]+)回・条件一致([\d,]+)セル(?:・条件一致([\d,]+)行)?$/))) {
+    const suffix = match[4] === undefined ? "" : ` · 조건 일치 ${match[4]}행`;
+    return `${match[1]}개 대상 × ${match[2]}회 · 조건 일치 ${match[3]}칸${suffix}`;
+  }
+  if ((match = source.match(/^候補を特定できませんでした。入力内容が正しい場合、現在の復元ボーナスカウンターが探索範囲（([\d,]+〜[\d,]+|指定範囲)）の外にある可能性があります。これまでこのセーブデータで復元ボーナスを抽選した、おおよその累計回数が含まれるように範囲を変更して、もう一度お試しください。$/))) {
+    const range = match[1] === "指定範囲" ? "지정 범위" : match[1].replace("〜", "~");
+    return `후보를 찾지 못했습니다. 입력이 정확하다면 현재 복원 보너스 카운터가 검색 범위(${range}) 밖에 있을 수 있습니다. 해당 세이브에서 추첨한 누적 횟수가 포함되도록 범위를 수정하고 다시 검색하세요.`;
+  }
+  if ((match = source.match(/^抽選(\d+)の(\d+)枠目「(.+)」は、選択した武器種・属性では抽選されません。武器種・属性と入力内容を確認してください。$/))) {
+    return `${match[1]}회차 ${match[2]}번 슬롯의 '${KO_TEXT[match[3]] ?? match[3]}'은 선택한 무기 종류·속성에서 나오지 않습니다. 입력값을 확인하세요.`;
+  }
+  if ((match = source.match(/^抽選(\d+)の「(.+)」が(\d+)枠あります。同一ボーナスは最大2枠です。入力内容を確認してください。$/))) {
+    return `${match[1]}회차에 '${KO_TEXT[match[2]] ?? match[2]}'이 ${match[3]}칸 있습니다. 동일한 보너스는 최대 2칸입니다.`;
+  }
+  if ((match = source.match(/^抽選(\d+)の(装填系|斬れ味系)ボーナスが(\d+)枠あります。\2は合計2枠までです。入力内容を確認してください。$/))) {
+    return `${match[1]}회차에 ${KO_TEXT[match[2]] ?? match[2]} 보너스가 ${match[3]}칸 있습니다. 이 계열은 최대 2칸입니다.`;
+  }
+  if ((match = source.match(/^抽選(\d+)の5枠がゲーム内の復元ボーナス上限に合いません。入力内容を確認してください。$/))) return `${match[1]}회차의 슬롯 5개가 게임 내 복원 보너스 상한에 맞지 않습니다. 입력값을 확인하세요.`;
+  if ((match = source.match(/^探索を開始できませんでした: (.+)$/))) return `검색을 시작하지 못했습니다: ${KO_TEXT[match[1]] ?? match[1]}`;
+  if ((match = source.match(/^未対応の復元ボーナスIDです: (\d+)$/))) return `지원하지 않는 복원 보너스 ID: ${match[1]}`;
+  if ((match = source.match(/^(.+)は([\d,]+)〜([\d,]+)の整数で入力してください。$/))) return `${KO_TEXT[match[1]] ?? match[1]}은(는) ${match[2]}~${match[3]} 사이의 정수로 입력해 주세요.`;
+  if ((match = source.match(/^(\d+)件の武器に未選択の枠があります。各武器の5枠をすべて選択してください。$/))) return `${match[1]}개 무기에 선택하지 않은 슬롯이 있습니다. 무기별 슬롯 5개를 모두 선택하세요.`;
+  if ((match = source.match(/^(\d+)\/(\d+) 構成入力済み$/))) return `구성 입력 ${match[1]}/${match[2]} 완료`;
+  if ((match = source.match(/^候補が([\d,]+)件あります。続きの再付与結果を追加してください。$/))) return `후보가 ${match[1]}개 남았습니다. 이어지는 스킬 재부여 결과를 추가해 주세요.`;
+  if ((match = source.match(/^セーブ状態コードを(入力欄|クリップボード)へコピーしました: (.+)$/))) {
+    return `저장 상태 코드를 ${match[1] === "入力欄" ? "입력란" : "클립보드"}에 복사했습니다: ${match[2]}`;
+  }
+  if ((match = source.match(/^(復元ボーナスカウンター|スキルカウンター)([\d,]+)を新しい0地点にしました。$/))) return `${KO_TEXT[match[1]]} ${match[2]}을(를) 새로운 0 위치로 설정했습니다.`;
+  if ((match = source.match(/^復元ボーナスカウンター ([\d,]+) を保存しました。$/))) return `복원 보너스 카운터 ${match[1]} 저장 완료`;
+  if ((match = source.match(/^スキルカウンター ([\d,]+) を保存しました。$/))) return `스킬 카운터 ${match[1]} 저장 완료`;
+  if ((match = source.match(/^(.+)の作成カウンター ([\d,]+) を保存しました。$/))) return `${KO_TEXT[match[1]] ?? match[1]}의 제작 카운터 ${match[2]} 저장 완료`;
+  if ((match = source.match(/^(.+)の武器構成「(.+)」をEX厳選用に保存しました。$/))) {
+    const composition = match[2].split("・").map((term) => KO_TEXT[term] ?? term).join("·");
+    return `${KO_TEXT[match[1]] ?? match[1]} 무기 구성을 EX 엄선용으로 저장했습니다: ${composition}.`;
+  }
+  if ((match = source.match(/^作成カウンター([\d,]+)を新しい0地点にしました。$/))) return `제작 카운터 ${match[1]}을(를) 새로운 0 위치로 설정했습니다.`;
+  if ((match = source.match(/^作成カウンター([\d,]+)〜([\d,]+)を検索中…$/))) return `제작 카운터 ${match[1]}~${match[2]} 검색 중…`;
+  if ((match = source.match(/^([\d,]+)件の候補が見つかりました。使用するカウンターを選んでください。$/))) return `후보 ${match[1]}개를 찾았습니다. 사용할 카운터를 선택해 주세요.`;
+  if ((match = source.match(/^カウンター ([\d,]+)を使用$/))) return `카운터 ${match[1]} 사용`;
+  if ((match = source.match(/^作成カウンター([\d,]+)を現在位置に設定しました。$/))) return `제작 카운터 ${match[1]}을(를) 현재 위치로 설정했습니다.`;
+  if ((match = source.match(/^(\d+)回先のリセット結果(?:から設定)?$/))) return `${match[1]}회 후 초기화 결과에서 설정`;
+  if ((match = source.match(/^EX厳選へ引き継ぐには、登録武器を(\d+)件未満にしてください。$/))) return `EX 엄선으로 넘기려면 등록 무기를 ${match[1]}개 미만으로 줄이세요.`;
+  if ((match = source.match(/^予測対象は最大(\d+)件です。不要な武器を削除してください。$/))) return `예측 대상은 최대 ${match[1]}개입니다. 불필요한 무기를 삭제하세요.`;
+  if ((match = source.match(/^セーブ状態コードをコピー: (.+)$/))) return `저장 상태 코드 복사: ${match[1]}`;
+  if ((match = source.match(/^(.+)を比較対象から削除$/))) return `${KO_TEXT[match[1]] ?? match[1]} 비교 대상에서 삭제`;
+  if ((match = source.match(/^現在の探索範囲: ([\d,]+)〜([\d,]+)（([\d,]+)候補）。(.+)$/))) {
+    const warnings = {
+      "狭い探索範囲です。推定値に自信がある場合に使用してください。": "검색 범위가 좁습니다. 예상값이 정확할 때 사용하세요.",
+      "端末によっては数分かかります。": "기기에 따라 몇 분이 걸릴 수 있습니다.",
+      "候補数が多いため長時間かかります。": "후보가 많아 오래 걸릴 수 있습니다.",
+      "非常に長時間かかります。可能なら推定値を見直して範囲を分割してください。": "매우 오래 걸립니다. 가능하면 예상값을 재검토하고 범위를 나누세요.",
+      "非常に長時間かかります。端末やブラウザによっては完了が難しい場合があります。": "매우 오래 걸립니다. 일부 기기나 브라우저에서는 완료하지 못할 수 있습니다.",
+    };
+    return `현재 검색 범위: ${match[1]}~${match[2]}(후보 ${match[3]}개). ${warnings[match[4]] ?? match[4]}`;
+  }
   return null;
 }
