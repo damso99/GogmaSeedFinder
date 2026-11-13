@@ -76,6 +76,10 @@
         <div class="ocr-preview-frame">
           <canvas id="ocr-preview" width="960" height="540" aria-label="드래그하여 인식 영역을 선택할 게임 화면 미리보기"></canvas>
         </div>
+        <details class="ocr-enhanced-details">
+          <summary data-ocr-text="enhancedPreview">보정된 인식 이미지 확인</summary>
+          <canvas id="ocr-enhanced-preview" width="720" height="240" aria-label="실제 OCR에 전달되는 보정 이미지 미리보기"></canvas>
+        </details>
         <div class="ocr-actions">
           <button type="button" id="ocr-reset-area" class="secondary" data-ocr-text="resetArea">영역 다시 지정</button>
           <button type="button" id="ocr-retry" class="secondary" data-ocr-text="retry">다시 인식</button>
