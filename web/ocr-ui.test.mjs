@@ -21,6 +21,10 @@ const files = {
     .replace(/^export /gm, ""),
   store: readFileSync(new URL("./ocr-observation-store.js", import.meta.url), "utf8")
     .replace(/^export /gm, ""),
+  event: readFileSync(new URL("./ocr-roll-event.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
+  consensus: readFileSync(new URL("./ocr-consensus.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
   ui: readFileSync(new URL("./ocr-ui.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
     .replace(/^export /gm, "")
@@ -81,7 +85,7 @@ function setup(initialText, { savedSnapshots = null } = {}) {
   }
   const names = [
     "ocr-panel", "ocr-preview", "ocr-mode", "ocr-preprocess", "ocr-auto",
-    "ocr-preview-zoom", "ocr-precision", "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
+    "ocr-preview-zoom", "ocr-precision", "ocr-event-mode", "ocr-event-state", "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
     "ocr-recognized", "weapon-type", "attribute-force", "artian-search-weapon-type",
     "artian-search-attribute-force",
   ];
@@ -146,6 +150,8 @@ function setup(initialText, { savedSnapshots = null } = {}) {
   vm.runInContext(files.hud, context);
   vm.runInContext(files.lines, context);
   vm.runInContext(files.store, context);
+  vm.runInContext(files.event, context);
+  vm.runInContext(files.consensus, context);
   vm.runInContext(files.ui, context);
   const ui = vm.runInContext("initializeOcrUi(document)", context);
   const observed = [];
@@ -415,5 +421,44 @@ test("reloading during the same game roll cannot append the already saved result
   await s.ui.scan();
   assert.equal(s.observed.length, 1);
   assert.deepEqual([...s.observed[0].ids], [13, 8, 8, 16, 6]);
+  s.ui.stop();
+});
+
+test("experimental event mode records once and waits for a real screen transition", async () => {
+  const initial = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup(initial);
+  s.nodes["ocr-event-mode"].checked=true;
+  s.nodes["ocr-event-mode"].dispatchEvent({type:"change"});
+  for(let i=0;i<6;i++) await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  const savedText=s.nodes["ocr-recognized"].textContent;
+  for(let i=0;i<7;i++) await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  assert.equal(s.nodes["ocr-recognized"].textContent,savedText);
+  s.ui.stop();
+});
+
+test("experimental event mode records genuinely identical consecutive results after visual departure", async () => {
+  const initial = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup(initial);
+  s.nodes["ocr-event-mode"].checked=true;
+  s.nodes["ocr-event-mode"].dispatchEvent({type:"change"});
+  for(let i=0;i<6;i++) await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  s.setFrame(160);
+  for(let i=0;i<6;i++) await s.ui.scan();
+  assert.equal(s.observed.length,2);
+  assert.deepEqual([...s.observed[1].ids],[8,12,9,15,10]);
+  s.ui.stop();
+});
+
+test("experimental mode does not auto-fill a single OCR pass", async () => {
+  const s=setup("기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX");
+  s.nodes["ocr-event-mode"].checked=true;
+  s.nodes["ocr-event-mode"].dispatchEvent({type:"change"});
+  await s.ui.scan();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length,0);
   s.ui.stop();
 });
