@@ -73,3 +73,16 @@ export function clearOcrSnapshot(storage, mode) {
     return false;
   }
 }
+
+export function lastSavedOcrSignature(mode, snapshot) {
+  const validated = validateOcrSnapshot(mode, snapshot);
+  if (!validated) return null;
+  const finished = validated.rows.filter((row) => mode === "skill"
+    ? Number.isInteger(row.seriesIndex) && Number.isInteger(row.groupIndex)
+    : row.every((id) => Number.isInteger(id)));
+  if (!finished.length) return null;
+  const last = finished[finished.length - 1];
+  return mode === "skill"
+    ? `skill:${last.seriesIndex}:${last.groupIndex}`
+    : `${mode}:${last.join(",")}`;
+}
