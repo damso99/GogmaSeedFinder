@@ -47,3 +47,12 @@ test("manually reselecting the crop resets only the frame cache", () => {
   gate.reset();
   assert.equal(gate.shouldScan(a), true);
 });
+
+test("new OCR text without optical change is not automatically advanced", () => {
+  const gate = createFrameThrottle();
+  const saved = frame(82);
+  gate.applied(saved);
+  assert.equal(gate.canAdvance(frame(83)), false);
+  assert.equal(gate.canAdvance(frame(92)), false);
+  assert.equal(gate.canAdvance(frame(160)), true);
+});
