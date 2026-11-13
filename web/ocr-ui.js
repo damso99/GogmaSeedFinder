@@ -1,7 +1,7 @@
 import { getLocale } from "./i18n.js";
 import { createOcrSequencer, parseOcrResult } from "./ocr-parser.js";
 import { createFrameThrottle } from "./ocr-frame.js";
-import { ocrRenderSize, enhanceOcrImageData, bestOcrCandidate } from "./ocr-image.js";
+import { ocrRenderSize, enhanceOcrImageData, removeVariableBackground, bestOcrCandidate } from "./ocr-image.js";
 import { pointerToCanvasImage } from "./ocr-geometry.js";
 import { buildHudFingerprint, stabilizeTransition } from "./ocr-hud.js";
 import { frameDifference } from "./ocr-frame.js";
@@ -30,6 +30,7 @@ const TEXT = {
     dark: "밝은 배경 · 어두운 글자",
     original: "원본 인식",
     enhanced: "선명하게 보정 (권장)",
+    adaptive: "배경색 제거 (장면 변화에 강함)",
     enhancedPreview: "OCR에 전달되는 보정 이미지 확인",
     resetArea: "영역 다시 지정",
     retry: "다시 인식",
@@ -68,6 +69,7 @@ const TEXT = {
     dark: "Light background · dark text",
     original: "Original image",
     enhanced: "Enhanced clarity (recommended)",
+    adaptive: "Remove game background",
     enhancedPreview: "Preview processed OCR image",
     resetArea: "Reselect region",
     retry: "Read again",
@@ -106,6 +108,7 @@ const TEXT = {
     dark: "明るい背景・暗い文字",
     original: "画像のまま",
     enhanced: "鮮明化（推奨）",
+    adaptive: "ゲーム背景を除去",
     enhancedPreview: "OCR画像を確認",
     resetArea: "範囲を再選択",
     retry: "もう一度認識",
@@ -144,6 +147,7 @@ const TEXT = {
     dark: "淺色背景·深色文字",
     original: "原始影像",
     enhanced: "強化清晰度（建議）",
+    adaptive: "去除遊戲背景",
     enhancedPreview: "檢視增強影像",
     resetArea: "重新選取區域",
     retry: "重新辨識",
@@ -409,9 +413,10 @@ export function initializeOcrUi(doc = document) {
     workContext.drawImage(video, left, top, width, height,
       padding, padding, renderedWidth, renderedHeight);
 
-    if (preprocess === "enhanced") {
+    if (preprocess === "enhanced" || preprocess === "adaptive") {
       const image = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
-      enhanceOcrImageData(image);
+      if (preprocess === "adaptive") removeVariableBackground(image);
+      else enhanceOcrImageData(image);
       workContext.putImageData(image, padding, padding);
     } else if (preprocess === "light" || preprocess === "dark") {
       const frame = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
@@ -553,6 +558,26 @@ export function initializeOcrUi(doc = document) {
           if (winner.result === secondaryResult) {
             chosen = secondary;
             result = secondaryResult;
+          }
+        }
+      }
+      // The alternative full-block preprocessing can still fail when a
+      // bright moving background shines through the translucent game panel.
+      // Try local illumination subtraction once before per-row OCR.
+      if (!result.complete || (Number(chosen?.data?.confidence) || 0) < MIN_AUTO_CONFIDENCE) {
+        const backgroundImage = captureRegion("adaptive");
+        if (backgroundImage) {
+          const backgroundRead = await worker.recognize(backgroundImage);
+          if (epoch !== session || !video) return;
+          const backgroundResult = parseOcrResult(modeSelect.value, backgroundRead?.data?.text ?? "");
+          const backgroundConfidence = Number(backgroundRead?.data?.confidence) || 0;
+          const winner = bestOcrCandidate(
+            { result, confidence: Number(chosen?.data?.confidence) || 0 },
+            { result: backgroundResult, confidence: backgroundConfidence },
+          );
+          if (winner.result === backgroundResult) {
+            chosen = backgroundRead;
+            result = backgroundResult;
           }
         }
       }
