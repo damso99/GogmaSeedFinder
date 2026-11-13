@@ -344,14 +344,44 @@ export function initializeOcrUi(doc = document) {
       const frame = workContext.getImageData(0, 0, workCanvas.width, workCanvas.height);
       const data = frame.data;
       const brightLetters = preprocess === "light";
-      for (let index = 0; index < data.length; index += 4) {
-        const brightness = data[index] * 0.2126 + data[index + 1] * 0.7152 + data[index + 2] * 0.0722;
-        const textPixel = brightLetters ? brightness >= 151 : brightness <= 108;
+      const histogram = new Uint32Array(256);
+      const brightnesses = new Uint8Array(data.length / 4);
+      let totalBrightness = 0;
+      for (let i = 0; i < brightnesses.length; i++) {
+        const p = i * 4;
+        const lightness = Math.round(
+          data[p] * 0.2126 + data[p + 1] * 0.7152 + data[p + 2] * 0.0722,
+        );
+        brightnesses[i] = lightness;
+        histogram[lightness]++;
+        totalBrightness += lightness;
+      }
+      // Dynamic Otsu threshold retains Korean strokes across different
+      // brightness settings, unlike the former hard-coded 151/108 cutoffs.
+      let bestVariance = -1;
+      let threshold = 128;
+      let backgroundPixels = 0;
+      let backgroundBrightness = 0;
+      for (let i = 0; i < 256; i++) {
+        backgroundPixels += histogram[i];
+        backgroundBrightness += i * histogram[i];
+        const foregroundPixels = brightnesses.length - backgroundPixels;
+        if (!backgroundPixels || !foregroundPixels) continue;
+        const difference = backgroundBrightness / backgroundPixels
+          - (totalBrightness - backgroundBrightness) / foregroundPixels;
+        const variance = backgroundPixels * foregroundPixels * difference * difference;
+        if (variance > bestVariance) {
+          bestVariance = variance;
+          threshold = i;
+        }
+      }
+      for (let i = 0; i < brightnesses.length; i++) {
+        const textPixel = brightLetters
+          ? brightnesses[i] > threshold : brightnesses[i] <= threshold;
         const value = textPixel ? 0 : 255;
-        data[index] = value;
-        data[index + 1] = value;
-        data[index + 2] = value;
-        data[index + 3] = 255;
+        const p = i * 4;
+        data[p] = data[p + 1] = data[p + 2] = value;
+        data[p + 3] = 255;
       }
       workContext.putImageData(frame, 0, 0);
     }
