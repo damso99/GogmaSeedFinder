@@ -89,6 +89,7 @@ function setup(initialText) {
   doc.head = { append() {} };
 
   let text = initialText;
+  let nextReadings = [];
   let recognitionCount = 0;
   let workersTerminated = 0;
   const library = {
@@ -99,7 +100,10 @@ function setup(initialText) {
         setParameters: async () => {},
         recognize: async () => {
           recognitionCount++;
-          return { data: { text, confidence: 92 } };
+          const reading = nextReadings.length
+            ? nextReadings.shift()
+            : { text, confidence: 92 };
+          return { data: { text: reading.text, confidence: reading.confidence ?? 92 } };
         },
         terminate: async () => { workersTerminated++; },
       };
@@ -149,6 +153,7 @@ function setup(initialText) {
   return {
     nodes, doc, ui, observed, video, CustomEvent,
     setText(value) { text = value; },
+    setReadings(value) { nextReadings = [...value]; },
     setFrame(value) { frameLevel = value; },
     getRecognitionCount: () => recognitionCount,
     getWorkersTerminated: () => workersTerminated,
@@ -312,5 +317,22 @@ test("preview zoom preserves the selected crop and avoids object-fit offset", ()
   s.nodes["ocr-preview"].dispatchEvent({type:"pointermove",clientX:500,clientY:320,pointerId:1});
   s.nodes["ocr-preview"].dispatchEvent({type:"pointerup",clientX:500,clientY:320,pointerId:1});
   assert.equal(s.nodes["ocr-status"].dataset.state,"info");
+  s.ui.stop();
+});
+
+test("adaptive background pass can rescue otherwise unreadable bonus rows", async () => {
+  const valid = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const bad = "노이즈\n복원 정보 누락";
+  const s = setup(bad);
+  s.setReadings([
+    { text: bad, confidence: 12 }, { text: bad, confidence: 18 }, { text: valid, confidence: 84 },
+    { text: bad, confidence: 12 }, { text: bad, confidence: 18 }, { text: valid, confidence: 84 },
+  ]);
+  await s.ui.scan();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  assert.deepEqual([...s.observed[0].ids], [8, 12, 9, 15, 10]);
+  assert.equal(s.getRecognitionCount(), 6);
   s.ui.stop();
 });
