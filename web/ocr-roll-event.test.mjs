@@ -46,7 +46,6 @@ test("the same exact roll can occur twice after a real interstitial event", () =
   detector.observe(sample());
   detector.confirm(sample());
   detector.observe(sample(255));
-  detector.observe(sample(255));
   detector.observe(sample());
   assert.equal(detector.observe(sample()).ready,true);
   assert.equal(detector.getState().eventId,2);
@@ -58,6 +57,7 @@ test("a strong transition in one frame can enter settling instead of being misse
   detector.observe(sample());
   detector.confirm(sample());
   assert.equal(detector.observe(sample(255)).phase,"transition");
+  assert.equal(detector.observe(sample(255)).ready,false);
   assert.equal(detector.observe(sample(255)).ready,true);
 });
 
