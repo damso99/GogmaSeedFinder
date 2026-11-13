@@ -26,19 +26,21 @@ export function createFrameThrottle({ maxScansPerView = 2 } = {}) {
   let lastView = null;
   let scansOfView = 0;
   let appliedView = null;
+  let allowOneRetry = false;
 
   return {
     shouldScan(frame) {
       if (!frame?.length) return true;
       // The previously saved result should not be OCR'd or entered again
       // merely because recognition fluctuates between scans.
-      if (appliedView && frameDifference(appliedView, frame).same) return false;
+      if (appliedView && frameDifference(appliedView, frame).same && !allowOneRetry) return false;
       if (!lastView || !frameDifference(lastView, frame).same) {
         lastView = frame.slice();
         scansOfView = 0;
       }
-      if (scansOfView >= maxScansPerView) return false;
+      if (scansOfView >= maxScansPerView && !allowOneRetry) return false;
       scansOfView++;
+      allowOneRetry = false;
       return true;
     },
     // Require meaningful optical change before another DIFFERENT OCR value
@@ -50,11 +52,20 @@ export function createFrameThrottle({ maxScansPerView = 2 } = {}) {
     },
     applied(frame) {
       appliedView = frame?.slice() ?? null;
+      allowOneRetry = false;
+    },
+    retry() {
+      // Explicit re-read keeps the last applied image so the same roll still
+      // cannot be inserted twice, even after OCR preprocessing changes.
+      lastView = null;
+      scansOfView = 0;
+      allowOneRetry = true;
     },
     reset() {
       lastView = null;
       scansOfView = 0;
       appliedView = null;
+      allowOneRetry = false;
     },
   };
 }
