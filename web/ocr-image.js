@@ -19,8 +19,8 @@ export function ocrRenderSize(width, height, {
     maxHeight / height,
     Math.sqrt(maxPixels / (width * height)),
   );
-  const renderedWidth = Math.max(1, Math.round(width * scale));
-  const renderedHeight = Math.max(1, Math.round(height * scale));
+  const renderedWidth = Math.max(1, Math.floor(width * scale));
+  const renderedHeight = Math.max(1, Math.floor(height * scale));
   return {
     scale,
     padding,
