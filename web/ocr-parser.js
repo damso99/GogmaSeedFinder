@@ -144,6 +144,10 @@ export function createOcrSequencer({ stablePasses = 2 } = {}) {
     alreadyApplied(signature) {
       return signature === lastApplied;
     },
+    clearPending() {
+      pending = null;
+      pendingCount = 0;
+    },
     reset() {
       pending = null;
       pendingCount = 0;
