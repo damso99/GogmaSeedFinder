@@ -624,7 +624,10 @@ export function initializeOcrUi(doc = document) {
       if (eventModeCheck?.checked && (!eventState?.ready
         || eventState.eventId === committedEventId)) return;
       const capturedEventId = eventModeCheck?.checked ? eventState.eventId : null;
-      if (!frameStable.observe(frame, (a, b) => frameDifference(a, b).changedRatio < 0.025)) return;
+      // Event mode is already settled via high-frequency preview frames;
+      // do not wait another two slow OCR intervals.
+      if (!eventModeCheck?.checked
+        && !frameStable.observe(frame, (a, b) => frameDifference(a, b).changedRatio < 0.025)) return;
       if (!frameThrottle.shouldScan(frame)) return;
       // In experimental event mode, a confirmed visual transition can mean
       // a genuinely identical consecutive roll. Legacy mode still uses the
