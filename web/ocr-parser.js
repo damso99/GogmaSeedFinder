@@ -98,6 +98,12 @@ export function parseOcrResult(mode, text) {
     };
   }
 
+  // Keep positions only when the OCR region contains exactly five lines.
+  // Never shift a missing middle option into the preceding slot: slot order
+  // is essential for the seed search.
+  const slotIds = lines.length === 5
+    ? lines.map((line) => matchBonusLine(line, mode))
+    : [];
   const mapped = lines.map((line) => ({ line, id: matchBonusLine(line, mode) }))
     .filter((result) => result.id !== null);
   const ids = mapped.map(({ id }) => id);
@@ -105,6 +111,7 @@ export function parseOcrResult(mode, text) {
   return {
     mode, complete, recognized: ids.length, lines,
     ids: complete ? ids : [],
+    slotIds,
     labels: mapped.map(({ line }) => line),
     signature: complete ? `${mode}:${ids.join(",")}` : null,
   };

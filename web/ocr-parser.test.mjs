@@ -87,3 +87,17 @@ test("incomplete OCR cannot rearm already recorded results; different confirmed 
   assert.equal(sequencer.observe(first), false);
   assert.equal(sequencer.observe(first), true);
 });
+
+test("a missing middle bonus keeps its original slot for temporal OCR consensus", () => {
+  const partial = recognize("gogma", [
+    "기초 공격력 강화Ⅱ",
+    "기초 공격력 강화Ⅲ",
+    "보이지 않는 화면 효과",
+    "기초 공격력 강화 EX",
+    "예리도 강화 EX",
+  ].join("\n"));
+  assert.equal(partial.complete, false);
+  assert.deepEqual(partial.slotIds, [8, 12, null, 15, 10]);
+  assert.deepEqual(partial.ids, []);
+  assert.deepEqual(recognize("gogma", "기초 공격력 강화Ⅱ\n회심률 강화Ⅱ").slotIds, []);
+});

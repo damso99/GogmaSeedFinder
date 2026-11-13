@@ -7,6 +7,8 @@ import { buildHudFingerprint, stabilizeTransition } from "./ocr-hud.js";
 import { frameDifference } from "./ocr-frame.js";
 import { recognizeResultRows } from "./ocr-lines.js";
 import { loadOcrSnapshots, lastSavedOcrSignature } from "./ocr-observation-store.js";
+import { createRollEventDetector } from "./ocr-roll-event.js";
+import { createOcrConsensus } from "./ocr-consensus.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1200;
@@ -21,6 +23,12 @@ const TEXT = {
     modeLabel: "인식 대상",
     zoomLabel: "인식 영역 확대",
     zoomFit: "화면에 맞춤",
+    eventMode: "복원 이벤트 추적 + 다중 프레임 인식 (시험 기능)",
+    eventIdle: "이벤트 추적 비활성 · 기존 OCR 방식 사용",
+    eventInitial: "이벤트 감시: 첫 결과 화면이 안정화되기를 기다리는 중",
+    eventTransition: "복원 중 또는 화면 전환 감지 · 안정화 대기",
+    eventReady: "결과 화면 안정화 · 여러 프레임 OCR 확인 중",
+    eventLocked: "인식 완료 · 다음 복원 화면 전환 대기",
     precision: "정밀 분석 (옵션 5줄 각각 인식, 느림)",
     gogma: "거극 아티어 복원",
     artian: "일반 아티어 복원",
@@ -60,6 +68,12 @@ const TEXT = {
     modeLabel: "Recognition target",
     zoomLabel: "Preview zoom",
     zoomFit: "Fit width",
+    eventMode: "Track reroll event + multi-frame OCR (experimental)",
+    eventIdle: "Event tracking off · original OCR mode",
+    eventInitial: "Waiting for the first stable result",
+    eventTransition: "Screen transition detected · waiting to settle",
+    eventReady: "Stable result · combining OCR frames",
+    eventLocked: "Result recorded · waiting for next reroll",
     precision: "Precise reading (individual rows, slower)",
     gogma: "Gogma reinforcement",
     artian: "Base Artian reinforcement",
@@ -99,6 +113,12 @@ const TEXT = {
     modeLabel: "認識対象",
     zoomLabel: "プレビュー拡大",
     zoomFit: "幅に合わせる",
+    eventMode: "再抽選イベント追跡 + 複数フレーム認識（試験）",
+    eventIdle: "イベント追跡オフ",
+    eventInitial: "最初の安定した画面を待機中",
+    eventTransition: "画面切替を検出 · 安定化を待機中",
+    eventReady: "画面安定 · OCR結果を照合中",
+    eventLocked: "入力完了 · 次の再抽選を待機中",
     precision: "精密認識 (各行を読み取る・低速)",
     gogma: "巨戟アーティア復元",
     artian: "通常アーティア復元",
@@ -138,6 +158,12 @@ const TEXT = {
     modeLabel: "辨識目標",
     zoomLabel: "預覽放大",
     zoomFit: "符合寬度",
+    eventMode: "追蹤重抽事件 + 多影格辨識（實驗）",
+    eventIdle: "事件追蹤關閉",
+    eventInitial: "等待第一個穩定畫面",
+    eventTransition: "偵測到畫面轉換 · 等待穩定",
+    eventReady: "畫面穩定 · 核對多影格OCR",
+    eventLocked: "輸入完成 · 等待下一次重抽",
     precision: "精確辨識 (逐行，速度較慢)",
     gogma: "巨戟機械武器復原",
     artian: "一般機械武器復原",
@@ -217,6 +243,8 @@ export function initializeOcrUi(doc = document) {
   const processSelect = $("#ocr-preprocess");
   const zoomSelect = $("#ocr-preview-zoom");
   const precisionCheck = $("#ocr-precision");
+  const eventModeCheck = $("#ocr-event-mode");
+  const eventStatus = $("#ocr-event-state");
   const autoCheck = $("#ocr-auto");
   const resetButton = $("#ocr-reset-area");
   const retryButton = $("#ocr-retry");
@@ -242,6 +270,8 @@ export function initializeOcrUi(doc = document) {
   const frameContext = frameCanvas.getContext("2d", { willReadFrequently: true });
   const frameThrottle = createFrameThrottle({ maxScansPerView: 3 });
   const frameStable = stabilizeTransition({ stableFrames: 2 });
+  const rollEvents = createRollEventDetector();
+  const consensus = createOcrConsensus({ windowSize: 5, minVotes: 2 });
   const regions = getStoredRegions();
   const sequencers = {
     gogma: createOcrSequencer(),
@@ -269,6 +299,8 @@ export function initializeOcrUi(doc = document) {
   let lastRejectedSignature = null;
   let lastRejectedMessage = "";
   let currentFrame = null;
+  let activeEventId = 0;
+  let committedEventId = 0;
   let region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
   let pointerOrigin = null;
   let pointerRegion = null;
@@ -276,6 +308,32 @@ export function initializeOcrUi(doc = document) {
   function setStatus(text, state = "info") {
     if (status.textContent !== text) status.textContent = text;
     if (status.dataset.state !== state) status.dataset.state = state;
+  }
+
+  function resetEventTracking() {
+    rollEvents.reset();
+    consensus.reset(modeSelect.value);
+    activeEventId = 0;
+    committedEventId = 0;
+    if (eventStatus) eventStatus.textContent = eventModeCheck?.checked
+      ? translations.eventInitial : translations.eventIdle;
+  }
+
+  function monitorRollFrame(frame) {
+    if (!eventModeCheck?.checked || !frame) return null;
+    const state = rollEvents.observe(frame);
+    if (state.newEvent) {
+      activeEventId = state.eventId;
+      consensus.reset(modeSelect.value);
+      frameThrottle.retry();
+      frameStable.reset();
+    }
+    if (eventStatus) {
+      const key = "event" + state.phase[0].toUpperCase() + state.phase.slice(1);
+      const message = translations[key] ?? translations.eventInitial;
+      if (eventStatus.textContent !== message) eventStatus.textContent = message;
+    }
+    return state;
   }
 
   function hasRecordedResult() {
@@ -302,6 +360,7 @@ export function initializeOcrUi(doc = document) {
     lastRejectedMessage = "";
     frameStable.reset();
     if (!retained) setStatus(region ? translations.reading : translations.selectArea);
+    consensus.reset(modeSelect.value);
   }
 
   function screenPoint(event, clamp = false) {
@@ -355,6 +414,7 @@ export function initializeOcrUi(doc = document) {
     try { localStorage.setItem(REGIONS_STORAGE_KEY, JSON.stringify(regions)); } catch {}
     sequencers[modeSelect.value].clearPending();
     session++;
+    resetEventTracking();
     resetReading();
   });
   preview.addEventListener("pointercancel", () => {
@@ -384,6 +444,9 @@ export function initializeOcrUi(doc = document) {
       context.lineWidth = 3;
       context.strokeStyle = "#f0d27c";
       context.strokeRect(x, y, w, h);
+    }
+    if (eventModeCheck?.checked && !pointerOrigin && validRegion(region)) {
+      monitorRollFrame(snapshotRegion());
     }
   }
 
@@ -530,6 +593,11 @@ export function initializeOcrUi(doc = document) {
     if (reply.success) {
       sequencers[result.mode].applied(result);
       frameThrottle.applied(currentFrame);
+      if (eventModeCheck?.checked && rollEvents.confirm(currentFrame)) {
+        committedEventId = activeEventId;
+        consensus.reset(result.mode);
+        if (eventStatus) eventStatus.textContent = translations.eventLocked;
+      }
       lastRejectedSignature = null;
       lastRejectedMessage = "";
       setStatus(reply.message, "success");
@@ -551,11 +619,21 @@ export function initializeOcrUi(doc = document) {
       const worker = await getWorker();
       if (epoch !== session || !video) return;
       const frame = snapshotRegion();
-      if (!frame || !frameStable.observe(frame, (a, b) => frameDifference(a, b).changedRatio < 0.025)) return;
+      if (!frame) return;
+      const eventState = monitorRollFrame(frame);
+      if (eventModeCheck?.checked && (!eventState?.ready
+        || eventState.eventId === committedEventId)) return;
+      const capturedEventId = eventModeCheck?.checked ? eventState.eventId : null;
+      // Event mode is already settled via high-frequency preview frames;
+      // do not wait another two slow OCR intervals.
+      if (!eventModeCheck?.checked
+        && !frameStable.observe(frame, (a, b) => frameDifference(a, b).changedRatio < 0.025)) return;
       if (!frameThrottle.shouldScan(frame)) return;
-      // An earlier confirmed game result must remain visible. Lighting noise
-      // is not a new restoration, even when Tesseract guesses different text.
-      if (hasRecordedResult() && !frameThrottle.canAdvance(frame)) return;
+      // In experimental event mode, a confirmed visual transition can mean
+      // a genuinely identical consecutive roll. Legacy mode still uses the
+      // old pixel guard for backwards compatibility.
+      if (!eventModeCheck?.checked && hasRecordedResult()
+        && !frameThrottle.canAdvance(frame)) return;
       currentFrame = frame;
       const image = captureRegion();
       if (!image) return;
@@ -625,15 +703,34 @@ export function initializeOcrUi(doc = document) {
           }
         }
       }
+      // OCR can take several seconds on large Korean crops. Never associate
+      // a finished OCR result with a newer reroll that appeared meanwhile.
+      if (eventModeCheck?.checked) {
+        const latest = rollEvents.getState();
+        if (!latest.ready || latest.eventId !== capturedEventId) return;
+      }
       const rawText = chosen?.data?.text ?? "";
       lastConfidence = Number(chosen?.data?.confidence) || 0;
-      const readyToApply = sequencers[result.mode].observe(result);
+      let combined = null;
+      if (eventModeCheck?.checked) {
+        combined = consensus.observe(result, lastConfidence);
+        if (combined) {
+          result = combined.result;
+          lastConfidence = combined.confidence;
+        }
+      }
+      const readyToApply = eventModeCheck?.checked
+        ? Boolean(combined?.result?.complete && activeEventId !== committedEventId
+          && (activeEventId > 1 || !sequencers[result.mode].alreadyApplied(result.signature)))
+        : sequencers[result.mode].observe(result);
       // Freeze the displayed result once it was saved. Wait for TWO stable
       // readings of a different result before replacing it; raw OCR glitches
       // alone must not make the same game screen look as if it changed.
       const savedResultOnScreen = lastResult?.complete
         && sequencers[lastResult.mode].alreadyApplied(lastResult.signature);
-      const confirmedVisualTransition = frameThrottle.canAdvance(currentFrame);
+      const confirmedVisualTransition = eventModeCheck?.checked
+        ? activeEventId !== committedEventId && rollEvents.getState().ready
+        : frameThrottle.canAdvance(currentFrame);
       const holdSavedOutput = savedResultOnScreen
         && (!readyToApply || !confirmedVisualTransition);
       const holdUnconfirmedChange = lastResult?.complete && result.complete
@@ -658,7 +755,7 @@ export function initializeOcrUi(doc = document) {
       } else if (lastRejectedSignature === result.signature) {
         setStatus(lastRejectedMessage, "error");
       } else if (readyToApply && autoCheck.checked && lastConfidence >= MIN_AUTO_CONFIDENCE
-        && frameThrottle.canAdvance(currentFrame)) {
+        && confirmedVisualTransition) {
         applyResult(result);
       } else if (readyToApply && autoCheck.checked && lastConfidence >= MIN_AUTO_CONFIDENCE) {
         // Keep the confirmation status and previously captured values visible.
@@ -716,7 +813,14 @@ export function initializeOcrUi(doc = document) {
     session++;
     region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
     sequencers[modeSelect.value].clearPending();
+    resetEventTracking();
     resetReading();
+  });
+  eventModeCheck?.addEventListener("change", () => {
+    session++;
+    sequencers[modeSelect.value].clearPending();
+    resetEventTracking();
+    resetReading({ keepRecognized: true });
   });
   precisionCheck?.addEventListener("change", () => {
     session++;
@@ -737,6 +841,7 @@ export function initializeOcrUi(doc = document) {
     delete regions[modeSelect.value];
     try { localStorage.setItem(REGIONS_STORAGE_KEY, JSON.stringify(regions)); } catch {}
     sequencers[modeSelect.value].clearPending();
+    resetEventTracking();
     resetReading();
   });
   retryButton?.addEventListener("click", () => {
