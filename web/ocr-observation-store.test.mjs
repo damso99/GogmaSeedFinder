@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   OCR_OBSERVATIONS_KEY,
   loadOcrSnapshots,
+  lastSavedOcrSignature,
   saveOcrSnapshot,
   clearOcrSnapshot,
 } from "./ocr-observation-store.js";
@@ -58,4 +59,12 @@ test("one mode can be cleared without deleting the others", () => {
   assert.equal(clearOcrSnapshot(storage, "skill"), true);
   assert.equal(loadOcrSnapshots(storage).skill, undefined);
   assert.ok(loadOcrSnapshots(storage).gogma);
+});
+
+test("saved last roll signature survives reloading and ignores empty trailing rows", () => {
+  const snap = { weaponType: 8, attributeForce: 1, rows: [[8, 12, 9, 15, 10], [null, null, null, null, null]] };
+  assert.equal(lastSavedOcrSignature("gogma", snap), "gogma:8,12,9,15,10");
+  assert.equal(lastSavedOcrSignature("artian", { weaponType: 6, attributeForce: 0, rows: [[4, 8, 7, 4, 6]] }), "artian:4,8,7,4,6");
+  assert.equal(lastSavedOcrSignature("skill", { weaponType: 8, attributeForce: 1, rows: [{seriesIndex:11,groupIndex:13}] }), "skill:11:13");
+  assert.equal(lastSavedOcrSignature("gogma", { weaponType: 8, attributeForce: 1, rows: [[null,null,null,null,null]] }), null);
 });
