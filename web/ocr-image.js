@@ -105,6 +105,54 @@ export function enhanceOcrImageData(image) {
   return image;
 }
 
+// Remove illumination/colour gradients behind the game's translucent HUD.
+// A local mean is computed with an integral image. Foreground strokes become
+// dark on white even when the scene changes from bright sand to a dark cave.
+// This is a fallback, because decorative high-contrast textures may survive.
+export function removeVariableBackground(image, radius = 12) {
+  const { width, height, data } = image ?? {};
+  const pixels = width * height;
+  if (!(width > 0 && height > 0) || !data || data.length < pixels * 4) return image;
+  const stride = width + 1;
+  const gray = new Uint8Array(pixels);
+  const integral = new Uint32Array(stride * (height + 1));
+  for (let y = 0; y < height; y++) {
+    let running = 0;
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      const p = i * 4;
+      const brightness = clamp(
+        data[p] * 0.2126 + data[p + 1] * 0.7152 + data[p + 2] * 0.0722,
+      );
+      gray[i] = brightness;
+      running += brightness;
+      integral[(y + 1) * stride + x + 1] =
+        integral[y * stride + x + 1] + running;
+    }
+  }
+  for (let y = 0; y < height; y++) {
+    const top = Math.max(0, y - radius);
+    const bottom = Math.min(height, y + radius + 1);
+    for (let x = 0; x < width; x++) {
+      const left = Math.max(0, x - radius);
+      const right = Math.min(width, x + radius + 1);
+      const total = integral[bottom * stride + right]
+        - integral[top * stride + right]
+        - integral[bottom * stride + left]
+        + integral[top * stride + left];
+      const mean = total / ((bottom - top) * (right - left));
+      // Both dark-on-light and light-on-dark text have high LOCAL contrast.
+      // Clip weak contrast so a moving ambient background disappears.
+      const contrast = Math.abs(gray[y * width + x] - mean);
+      const ink = clamp(255 - Math.max(0, contrast - 11) * 6);
+      const p = (y * width + x) * 4;
+      data[p] = data[p + 1] = data[p + 2] = ink;
+      data[p + 3] = 255;
+    }
+  }
+  return image;
+}
+
 export function bestOcrCandidate(left, right) {
   const score = ({ result, confidence = 0 }) =>
     (result.complete ? 1000 : 0) + result.recognized * 120
