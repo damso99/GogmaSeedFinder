@@ -531,7 +531,7 @@ export function initializeOcrUi(doc = document) {
       const worker = await getWorker();
       if (epoch !== session || !video) return;
       const frame = snapshotRegion();
-      if (!frame || !frameStable.observe(frame, (a, b) => frameDifference(a, b).same)) return;
+      if (!frame || !frameStable.observe(frame, (a, b) => frameDifference(a, b).changedRatio < 0.025)) return;
       if (!frameThrottle.shouldScan(frame)) return;
       currentFrame = frame;
       const image = captureRegion();
