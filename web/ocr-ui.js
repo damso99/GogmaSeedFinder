@@ -623,6 +623,7 @@ export function initializeOcrUi(doc = document) {
       const eventState = monitorRollFrame(frame);
       if (eventModeCheck?.checked && (!eventState?.ready
         || eventState.eventId === committedEventId)) return;
+      const capturedEventId = eventModeCheck?.checked ? eventState.eventId : null;
       if (!frameStable.observe(frame, (a, b) => frameDifference(a, b).changedRatio < 0.025)) return;
       if (!frameThrottle.shouldScan(frame)) return;
       // In experimental event mode, a confirmed visual transition can mean
@@ -698,6 +699,12 @@ export function initializeOcrUi(doc = document) {
             }
           }
         }
+      }
+      // OCR can take several seconds on large Korean crops. Never associate
+      // a finished OCR result with a newer reroll that appeared meanwhile.
+      if (eventModeCheck?.checked) {
+        const latest = rollEvents.getState();
+        if (!latest.ready || latest.eventId !== capturedEventId) return;
       }
       const rawText = chosen?.data?.text ?? "";
       lastConfidence = Number(chosen?.data?.confidence) || 0;
