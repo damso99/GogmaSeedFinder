@@ -19,13 +19,15 @@ const files = {
     .replace(/^export /gm, ""),
   lines: readFileSync(new URL("./ocr-lines.js", import.meta.url), "utf8")
     .replace(/^export /gm, ""),
+  store: readFileSync(new URL("./ocr-observation-store.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
   ui: readFileSync(new URL("./ocr-ui.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
     .replace(/^export /gm, "")
     .replace(/initializeOcrUi\(\);\s*$/, ""),
 };
 
-function setup(initialText) {
+function setup(initialText, { savedSnapshots = null } = {}) {
   let frameLevel = 0;
   let minorFlicker = false;
   class Node {
@@ -119,11 +121,13 @@ function setup(initialText) {
     clearInterval: (id) => handlers.delete(id),
   };
   const storage = {
-    getItem: () => JSON.stringify({
-      gogma: { x: 0.1, y: 0.1, w: 0.6, h: 0.6 },
-      artian: { x: 0.1, y: 0.1, w: 0.6, h: 0.6 },
-      skill: { x: 0.1, y: 0.1, w: 0.6, h: 0.6 },
-    }),
+    getItem: (key) => key === "gogma-ocr-observations-v1"
+      ? JSON.stringify(savedSnapshots)
+      : JSON.stringify({
+        gogma: { x: 0.1, y: 0.1, w: 0.6, h: 0.6 },
+        artian: { x: 0.1, y: 0.1, w: 0.6, h: 0.6 },
+        skill: { x: 0.1, y: 0.1, w: 0.6, h: 0.6 },
+      }),
     setItem() {},
   };
   class CustomEvent {
@@ -141,6 +145,7 @@ function setup(initialText) {
   vm.runInContext(files.geometry, context);
   vm.runInContext(files.hud, context);
   vm.runInContext(files.lines, context);
+  vm.runInContext(files.store, context);
   vm.runInContext(files.ui, context);
   const ui = vm.runInContext("initializeOcrUi(document)", context);
   const observed = [];
@@ -391,5 +396,24 @@ test("a capture reconnect keeps the latest confirmed result", async () => {
   s.doc.dispatchEvent(new s.CustomEvent("gogma:screen-share-started", { detail: { video: s.video } }));
   assert.equal(s.nodes["ocr-recognized"].textContent, before);
   assert.equal(s.observed.length, 1);
+  s.ui.stop();
+});
+
+test("reloading during the same game roll cannot append the already saved result again", async () => {
+  const existing = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(existing, {
+    savedSnapshots: { gogma: { weaponType: 8, attributeForce: 1, rows: [[8, 12, 9, 15, 10]] } },
+  });
+  await s.ui.scan();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 0);
+  s.setFrame(160);
+  s.setText("회심률 강화Ⅲ\n기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅱ\n회심률 강화 EX\n예리도 강화");
+  await s.ui.scan();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  assert.deepEqual([...s.observed[0].ids], [13, 8, 8, 16, 6]);
   s.ui.stop();
 });
