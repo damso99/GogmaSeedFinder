@@ -1,6 +1,8 @@
+import { KO_TEXT, translateKoreanTemplate } from "./ko-locale.js";
+
 const LANGUAGE_STORAGE_KEY = "gogma-seed-finder-language-v1";
 
-export const SUPPORTED_LANGUAGES = ["ja", "en", "zh-Hant"];
+export const SUPPORTED_LANGUAGES = ["ja", "en", "zh-Hant", "ko"];
 
 const OFFICIAL_TERMS = {
   "大剣": ["Great Sword", "大劍"],
@@ -549,12 +551,16 @@ export function t(source) {
   const locale = getLocale();
   if (locale === "ja" || typeof source !== "string") return source;
   const normalized = source.trim().replace(/\s+/g, " ");
+  if (locale === "ko") {
+    return KO_TEXT[normalized] ?? translateKoreanTemplate(normalized)
+      ?? ALL_TEXT[normalized]?.[0] ?? translateTemplate(normalized, "en", source);
+  }
   return ALL_TEXT[normalized]?.[localeIndex(locale)] ?? translateTemplate(normalized, locale, source);
 }
 
 export function formatNumber(value) {
   const locale = getLocale();
-  const numberLocale = locale === "zh-Hant" ? "zh-TW" : locale === "en" ? "en-US" : "ja-JP";
+  const numberLocale = locale === "zh-Hant" ? "zh-TW" : locale === "en" ? "en-US" : locale === "ko" ? "ko-KR" : "ja-JP";
   return Number(value).toLocaleString(numberLocale);
 }
 
@@ -564,7 +570,7 @@ export function localizedTargetName(weaponName, attributeName) {
     const attribute = attributeName === "無属性" ? attributeName : attributeName.replace("属性", "");
     return `${attribute}${weaponName}`;
   }
-  if (locale === "en") return `${t(attributeName)} ${t(weaponName)}`;
+  if (locale === "en" || locale === "ko") return `${t(attributeName)} ${t(weaponName)}`;
   return `${t(attributeName)}${t(weaponName)}`;
 }
 
