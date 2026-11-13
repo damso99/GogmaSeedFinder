@@ -24,7 +24,7 @@ const COPY = {
   },
   ja: {
     title: "リアルタイム画面共有",
-    description: "ゲーム画面を接続します。OCR自動入力は次の段階で追加します。",
+    description: "ゲーム画面を接続すると、復元結果をOCRで読み取り、計算機の入力欄に反映できます。",
     idle: "未接続",
     start: "画面共有を開始",
     stop: "共有を停止",
@@ -45,7 +45,7 @@ const COPY = {
   },
   en: {
     title: "Live Screen Sharing",
-    description: "Connect your game screen. OCR autofill will be added in the next phase.",
+    description: "Connect your game screen to recognize results and fill calculator fields automatically.",
     idle: "Not connected",
     start: "Share screen",
     stop: "Stop sharing",
@@ -66,7 +66,7 @@ const COPY = {
   },
   "zh-Hant": {
     title: "即時畫面分享",
-    description: "連接遊戲畫面。OCR自動填入功能將於下一階段加入。",
+    description: "連接遊戲畫面後，可透過OCR辨識並自動填入計算器。",
     idle: "尚未連接",
     start: "開始分享畫面",
     stop: "停止分享",
