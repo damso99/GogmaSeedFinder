@@ -470,15 +470,19 @@ export function initializeOcrUi(doc = document) {
       }
       const rawText = chosen?.data?.text ?? "";
       lastConfidence = Number(chosen?.data?.confidence) || 0;
-      // A partial/incorrect scan must not wipe out a previously complete
-      // observation or make the on-screen result flicker.
-      if (!lastResult?.complete || result.complete) {
+      const readyToApply = sequencers[result.mode].observe(result);
+      // Freeze the displayed result once it was saved. Wait for TWO stable
+      // readings of a different result before replacing it; raw OCR glitches
+      // alone must not make the same game screen look as if it changed.
+      const savedResultOnScreen = lastResult?.complete
+        && sequencers[lastResult.mode].alreadyApplied(lastResult.signature);
+      const holdSavedOutput = savedResultOnScreen && !readyToApply;
+      if (!holdSavedOutput && (!lastResult?.complete || result.complete)) {
         lastResult = result;
         const nextOutput = `${rawText.trim() || "—"}\n\n[${result.recognized}/${result.mode === "skill" ? 2 : 5}] ${result.labels.join(" / ")}`;
         if (output.textContent !== nextOutput) output.textContent = nextOutput;
         applyButton.disabled = !result.complete;
       }
-      const readyToApply = sequencers[result.mode].observe(result);
       if (!result.complete) {
         if (!lastResult?.complete) {
           setStatus(result.recognized
