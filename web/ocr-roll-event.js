@@ -33,7 +33,9 @@ export function createRollEventDetector({
       if (departureCount >= departureFrames || difference >= strongDepartureRatio) {
         phase = "transition";
         previous = frame.slice();
-        stableCount = 1;
+        // A transition frame is not a stable result frame. The next two
+        // frames must agree before we accept the new OCR window.
+        stableCount = 0;
       }
     } else if (phase === "initial" || phase === "transition" || phase === "ready") {
       const similarity = previous ? ratioChanged(previous, frame) : 1;
