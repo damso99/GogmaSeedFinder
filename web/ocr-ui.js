@@ -444,6 +444,7 @@ export function initializeOcrUi(doc = document) {
     const epoch = session;
     running = true;
     try {
+      if (!workerPromise) setStatus(translations.loading);
       const worker = await getWorker();
       if (epoch !== session || !video) return;
       const frame = snapshotRegion();
