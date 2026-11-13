@@ -27,6 +27,7 @@ const files = {
 
 function setup(initialText) {
   let frameLevel = 0;
+  let minorFlicker = false;
   class Node {
     constructor(id) {
       this.id = id;
@@ -66,7 +67,8 @@ function setup(initialText) {
           const data = new Uint8ClampedArray(node.width === 192 ? 128 : 20);
           if (node.width === 192) {
             for (let i = 0; i < data.length; i += 4) {
-              data[i] = data[i + 1] = data[i + 2] = frameLevel;
+              const pixel = minorFlicker && i === 0 ? frameLevel + 40 : frameLevel;
+              data[i] = data[i + 1] = data[i + 2] = pixel;
               data[i + 3] = 255;
             }
           }
@@ -155,6 +157,7 @@ function setup(initialText) {
     setText(value) { text = value; },
     setReadings(value) { nextReadings = [...value]; },
     setFrame(value) { frameLevel = value; },
+    setMinorFlicker(value) { minorFlicker = value; },
     getRecognitionCount: () => recognitionCount,
     getWorkersTerminated: () => workersTerminated,
   };
@@ -334,5 +337,59 @@ test("adaptive background pass can rescue otherwise unreadable bonus rows", asyn
   assert.equal(s.observed.length, 1);
   assert.deepEqual([...s.observed[0].ids], [8, 12, 9, 15, 10]);
   assert.equal(s.getRecognitionCount(), 6);
+  s.ui.stop();
+});
+
+test("OCR result remains visible after retry and preprocessing changes", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(text);
+  await s.ui.scan();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length, 1);
+  const savedOutput = s.nodes["ocr-recognized"].textContent;
+  const savedStatus = s.nodes["ocr-status"].textContent;
+  for (const id of ["ocr-retry", "ocr-preprocess", "ocr-precision"]) {
+    if (id === "ocr-retry") s.nodes[id].click();
+    else s.nodes[id].dispatchEvent({ type: "change" });
+    assert.equal(s.nodes["ocr-recognized"].textContent, savedOutput, "OCR text should not reset for " + id);
+    assert.equal(s.nodes["ocr-status"].textContent, savedStatus, "saved status should remain for " + id);
+    await s.ui.scan();
+    await s.ui.scan();
+  }
+  assert.equal(s.observed.length, 1);
+  s.ui.stop();
+});
+
+test("minor image flicker with a different OCR guess never clears the saved result", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(text);
+  await s.ui.scan();
+  await s.ui.scan();
+  await s.ui.scan();
+  const before = s.nodes["ocr-recognized"].textContent;
+  const status = s.nodes["ocr-status"].textContent;
+  const count = s.getRecognitionCount();
+  s.setMinorFlicker(true);
+  s.setText("회심률 강화Ⅲ\n회심률 강화Ⅲ\n기초 공격력 강화Ⅱ\n예리도 강화 EX\n예리도 강화 EX");
+  for (let i = 0; i < 9; i++) await s.ui.scan();
+  assert.equal(s.nodes["ocr-recognized"].textContent, before);
+  assert.equal(s.nodes["ocr-status"].textContent, status);
+  assert.equal(s.observed.length, 1);
+  assert.equal(s.getRecognitionCount(), count);
+  s.ui.stop();
+});
+
+test("a capture reconnect keeps the latest confirmed result", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(text);
+  await s.ui.scan();
+  await s.ui.scan();
+  await s.ui.scan();
+  const before = s.nodes["ocr-recognized"].textContent;
+  s.ui.stop();
+  s.doc.dispatchEvent(new s.CustomEvent("gogma:screen-share-started", { detail: { video: s.video } }));
+  assert.equal(s.nodes["ocr-recognized"].textContent, before);
+  assert.equal(s.observed.length, 1);
   s.ui.stop();
 });
