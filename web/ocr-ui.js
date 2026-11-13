@@ -3,9 +3,12 @@ import { createOcrSequencer, parseOcrResult } from "./ocr-parser.js";
 import { createFrameThrottle } from "./ocr-frame.js";
 import { ocrRenderSize, enhanceOcrImageData, bestOcrCandidate } from "./ocr-image.js";
 import { pointerToCanvasImage } from "./ocr-geometry.js";
+import { buildHudFingerprint, stabilizeTransition } from "./ocr-hud.js";
+import { frameDifference } from "./ocr-frame.js";
+import { recognizeResultRows } from "./ocr-lines.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
-const OCR_INTERVAL_MS = 1800;
+const OCR_INTERVAL_MS = 1200;
 const PREVIEW_INTERVAL_MS = 180;
 const MIN_AUTO_CONFIDENCE = 42;
 const REGIONS_STORAGE_KEY = "gogma-ocr-regions-v1";
@@ -15,6 +18,9 @@ const TEXT = {
     heading: "복원 결과 자동 입력",
     description: "인식할 신규 옵션 5줄(스킬은 2줄)만 게임 화면에서 드래그해 선택하세요.",
     modeLabel: "인식 대상",
+    zoomLabel: "인식 영역 확대",
+    zoomFit: "화면에 맞춤",
+    precision: "정밀 분석 (옵션 5줄 각각 인식, 느림)",
     gogma: "거극 아티어 복원",
     artian: "일반 아티어 복원",
     skill: "스킬 재부여",
@@ -50,6 +56,9 @@ const TEXT = {
     heading: "Auto-fill from game screen",
     description: "Drag a region containing only the five new bonus lines (two for skills).",
     modeLabel: "Recognition target",
+    zoomLabel: "Preview zoom",
+    zoomFit: "Fit width",
+    precision: "Precise reading (individual rows, slower)",
     gogma: "Gogma reinforcement",
     artian: "Base Artian reinforcement",
     skill: "Skill reset",
@@ -85,6 +94,9 @@ const TEXT = {
     heading: "画面から結果を自動入力",
     description: "新しい結果の5項目（スキルは2項目）だけをドラッグして選択してください。",
     modeLabel: "認識対象",
+    zoomLabel: "プレビュー拡大",
+    zoomFit: "幅に合わせる",
+    precision: "精密認識 (各行を読み取る・低速)",
     gogma: "巨戟アーティア復元",
     artian: "通常アーティア復元",
     skill: "スキル再付与",
@@ -120,6 +132,9 @@ const TEXT = {
     heading: "遊戲畫面自動填入",
     description: "拖曳並選取只有五項新加成（技能為兩項）的區域。",
     modeLabel: "辨識目標",
+    zoomLabel: "預覽放大",
+    zoomFit: "符合寬度",
+    precision: "精確辨識 (逐行，速度較慢)",
     gogma: "巨戟機械武器復原",
     artian: "一般機械武器復原",
     skill: "技能重新附加",
@@ -196,6 +211,7 @@ export function initializeOcrUi(doc = document) {
   const modeSelect = $("#ocr-mode");
   const processSelect = $("#ocr-preprocess");
   const zoomSelect = $("#ocr-preview-zoom");
+  const precisionCheck = $("#ocr-precision");
   const autoCheck = $("#ocr-auto");
   const resetButton = $("#ocr-reset-area");
   const retryButton = $("#ocr-retry");
@@ -220,6 +236,7 @@ export function initializeOcrUi(doc = document) {
   frameCanvas.height = 108;
   const frameContext = frameCanvas.getContext("2d", { willReadFrequently: true });
   const frameThrottle = createFrameThrottle({ maxScansPerView: 3 });
+  const frameStable = stabilizeTransition({ stableFrames: 2 });
   const regions = getStoredRegions();
   const sequencers = {
     gogma: createOcrSequencer(),
@@ -256,6 +273,7 @@ export function initializeOcrUi(doc = document) {
     lastRejectedSignature = null;
     lastRejectedMessage = "";
     frameThrottle.reset();
+    frameStable.reset();
     currentFrame = null;
     applyButton.disabled = true;
     output.textContent = "—";
@@ -354,6 +372,12 @@ export function initializeOcrUi(doc = document) {
     if (width < 25 || height < 15) return null;
     frameContext.drawImage(video, x, y, width, height, 0, 0, frameCanvas.width, frameCanvas.height);
     const bytes = frameContext.getImageData(0, 0, frameCanvas.width, frameCanvas.height).data;
+    // Ignore global lighting shifts: monitor the geometry of the text strokes
+    // and UI outlines rather than the raw color/brightness of the background.
+    const fingerprint = buildHudFingerprint({
+      data: bytes, width: frameCanvas.width, height: frameCanvas.height,
+    });
+    if (fingerprint) return fingerprint;
     const frame = new Uint8Array(Math.floor(bytes.length / 4));
     for (let i = 0; i < frame.length; i++) {
       const p = i * 4;
@@ -502,7 +526,8 @@ export function initializeOcrUi(doc = document) {
       const worker = await getWorker();
       if (epoch !== session || !video) return;
       const frame = snapshotRegion();
-      if (!frame || !frameThrottle.shouldScan(frame)) return;
+      if (!frame || !frameStable.observe(frame, (a, b) => frameDifference(a, b).same)) return;
+      if (!frameThrottle.shouldScan(frame)) return;
       currentFrame = frame;
       const image = captureRegion();
       if (!image) return;
@@ -528,6 +553,27 @@ export function initializeOcrUi(doc = document) {
           if (winner.result === secondaryResult) {
             chosen = secondary;
             result = secondaryResult;
+          }
+        }
+      }
+      // Optional slow fallback: read each game bonus row separately.
+      // The crop must contain exactly five option rows (two skill rows).
+      if (precisionCheck?.checked && !result.complete) {
+        const stripImage = captureRegion("enhanced");
+        if (stripImage) {
+          const precise = await recognizeResultRows(worker, doc, stripImage, modeSelect.value);
+          if (epoch !== session || !video) return;
+          if (precise) {
+            const preciseResult = parseOcrResult(modeSelect.value, precise.data.text);
+            const preciseConfidence = Number(precise.data.confidence) || 0;
+            const winner = bestOcrCandidate(
+              { result, confidence: Number(chosen?.data?.confidence) || 0 },
+              { result: preciseResult, confidence: preciseConfidence },
+            );
+            if (winner.result === preciseResult) {
+              chosen = precise;
+              result = preciseResult;
+            }
           }
         }
       }
@@ -616,6 +662,11 @@ export function initializeOcrUi(doc = document) {
   modeSelect.addEventListener("change", () => {
     session++;
     region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
+    sequencers[modeSelect.value].clearPending();
+    resetReading();
+  });
+  precisionCheck?.addEventListener("change", () => {
+    session++;
     sequencers[modeSelect.value].clearPending();
     resetReading();
   });
