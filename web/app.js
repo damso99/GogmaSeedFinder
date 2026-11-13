@@ -12,6 +12,7 @@ import {
   predictArtianBaseRolls,
 } from "./artian-base-rng.js";
 import { localizedTargetName, t } from "./i18n.js";
+import { loadOcrSnapshots, saveOcrSnapshot, clearOcrSnapshot } from "./ocr-observation-store.js";
 
 const WEAPON_TYPES = [
   [0, "大剣"],
@@ -361,9 +362,65 @@ let saveState = persistedAppState.saveState;
 let comparisonTargets = persistedAppState.targets;
 let bonusPrediction = persistedAppState.bonusPrediction;
 let artianBaseState = persistedAppState.artianBaseState;
-renderObservationRows(SAMPLE_OBSERVATIONS);
-renderSkillObservationRows(Array.from({ length: 4 }, () => null));
-renderArtianObservationRows(Array.from({ length: 3 }, () => null));
+// Restore OCR observations before constructing the rest of the search UI.
+// Previously, every page reload overwrote actual observations with demo rows.
+const persistedOcrObservations = loadOcrSnapshots(localStorage);
+function hasSelectValue(select, value) {
+  return [...select.options].some((option) => option.value === String(value));
+}
+function restoreObservationRows(mode, weaponControl, attributeControl, render, fallback) {
+  const saved = persistedOcrObservations[mode];
+  if (saved && hasSelectValue(weaponControl, saved.weaponType)
+    && hasSelectValue(attributeControl, saved.attributeForce)) {
+    weaponControl.value = String(saved.weaponType);
+    attributeControl.value = String(saved.attributeForce);
+    render(saved.rows);
+    return true;
+  }
+  render(fallback);
+  return false;
+}
+restoreObservationRows("gogma", weaponSelect, attributeSelect,
+  renderObservationRows, SAMPLE_OBSERVATIONS);
+restoreObservationRows("skill", skillWeaponSelect, skillAttributeSelect,
+  renderSkillObservationRows, Array.from({ length: 4 }, () => null));
+const savedArtianObservations = persistedOcrObservations.artian;
+if (savedArtianObservations
+  && hasSelectValue(artianSearchWeaponSelect, savedArtianObservations.weaponType)
+  && hasSelectValue(artianSearchAttributeSelect, savedArtianObservations.attributeForce)) {
+  artianSearchWeaponSelect.value = artianBaseWeaponSelect.value = String(savedArtianObservations.weaponType);
+  artianSearchAttributeSelect.value = artianBaseAttributeSelect.value = String(savedArtianObservations.attributeForce);
+  renderArtianObservationRows(savedArtianObservations.rows);
+} else {
+  renderArtianObservationRows(Array.from({ length: 3 }, () => null));
+}
+
+function snapshotSkillObservationValues() {
+  return [...skillObservationRows.querySelectorAll(".skill-observation-row")].map((row) => {
+    const series = row.querySelector('[data-skill-kind="series"]').value;
+    const group = row.querySelector('[data-skill-kind="group"]').value;
+    return {
+      seriesIndex: series === "" ? null : Number(series),
+      groupIndex: group === "" ? null : Number(group),
+    };
+  });
+}
+
+function saveCurrentOcrObservations(mode) {
+  const values = mode === "gogma"
+    ? { weaponType: Number(weaponSelect.value), attributeForce: Number(attributeSelect.value), rows: snapshotObservationValues() }
+    : mode === "artian"
+      ? { weaponType: Number(artianSearchWeaponSelect.value), attributeForce: Number(artianSearchAttributeSelect.value), rows: snapshotArtianObservationValues() }
+      : mode === "skill"
+        ? { weaponType: Number(skillWeaponSelect.value), attributeForce: Number(skillAttributeSelect.value), rows: snapshotSkillObservationValues() }
+        : null;
+  if (values) saveOcrSnapshot(localStorage, mode, values);
+}
+function persistOcrIfTracked(mode) {
+  // Preserve manual corrections after the first OCR entry, but don't convert
+  // the upstream demo examples into persistent observations.
+  if (loadOcrSnapshots(localStorage)[mode]) saveCurrentOcrObservations(mode);
+}
 
 // Screen OCR never changes the RNG engine: it only fills the same observation
 // selects that users can fill manually. Acknowledge rejected readings so that
@@ -445,6 +502,7 @@ document.addEventListener("gogma:ocr-observation", (event) => {
     } else {
       throw new Error("알 수 없는 화면 인식 모드입니다.");
     }
+    saveCurrentOcrObservations(mode);
     success = true;
   } catch (error) {
     message = error instanceof Error ? error.message : String(error);
@@ -549,6 +607,7 @@ document.querySelector("#load-sample").addEventListener("click", () => {
   document.querySelector("#seed-start").value = "0";
   document.querySelector("#seed-end").value = "99999999";
   renderObservationRows(SAMPLE_OBSERVATIONS);
+  clearOcrSnapshot(localStorage, "gogma");
   updateBonusPoolNote();
   updateCounterRangeSummary();
   hideError();
@@ -564,6 +623,7 @@ document.querySelector("#load-bow-sample").addEventListener("click", () => {
   document.querySelector("#seed-start").value = "0";
   document.querySelector("#seed-end").value = "99999999";
   renderObservationRows(BOW_SAMPLE_OBSERVATIONS);
+  clearOcrSnapshot(localStorage, "gogma");
   updateBonusPoolNote();
   updateCounterRangeSummary();
   hideError();
@@ -579,6 +639,7 @@ document.querySelector("#load-heavy-bowgun-sample").addEventListener("click", ()
   document.querySelector("#seed-start").value = "0";
   document.querySelector("#seed-end").value = "99999999";
   renderObservationRows(HEAVY_BOWGUN_SAMPLE_OBSERVATIONS);
+  clearOcrSnapshot(localStorage, "gogma");
   updateBonusPoolNote();
   updateCounterRangeSummary();
   hideError();
@@ -808,6 +869,29 @@ removeArtianObservationButton.addEventListener("click", () => {
   clearArtianCounterSearchFeedback();
 });
 artianObservationRows.addEventListener("change", () => clearArtianCounterSearchFeedback());
+
+// Persist corrections to imported OCR observations; these listeners run after
+// upstream row add/remove handlers to store the final visible values.
+observationRows.addEventListener("change", () => persistOcrIfTracked("gogma"));
+skillObservationRows.addEventListener("change", () => persistOcrIfTracked("skill"));
+artianObservationRows.addEventListener("change", () => persistOcrIfTracked("artian"));
+for (const [button, mode] of [
+  [document.querySelector("#add-observation"), "gogma"],
+  [removeObservationButton, "gogma"],
+  [addSkillObservationButton, "skill"],
+  [removeSkillObservationButton, "skill"],
+  [addArtianObservationButton, "artian"],
+  [removeArtianObservationButton, "artian"],
+]) {
+  button.addEventListener("click", () => persistOcrIfTracked(mode));
+}
+[weaponSelect, attributeSelect].forEach((control) =>
+  control.addEventListener("change", () => persistOcrIfTracked("gogma")));
+[skillWeaponSelect, skillAttributeSelect].forEach((control) =>
+  control.addEventListener("change", () => persistOcrIfTracked("skill")));
+[artianSearchWeaponSelect, artianSearchAttributeSelect,
+  artianBaseWeaponSelect, artianBaseAttributeSelect].forEach((control) =>
+  control.addEventListener("change", () => persistOcrIfTracked("artian")));
 findArtianCounterButton.addEventListener("click", () => void searchArtianBaseCounter());
 exportArtianBaseCsvButton.addEventListener("click", () => exportArtianBasePredictionsCsv());
 artianFilterEnabled.addEventListener("change", () => {
