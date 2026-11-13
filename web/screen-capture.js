@@ -3,7 +3,7 @@ import { getLocale } from "./i18n.js";
 const COPY = {
   ko: {
     title: "실시간 화면 공유",
-    description: "게임 화면을 연결합니다. OCR 자동 입력은 다음 단계에서 추가됩니다.",
+    description: "게임 화면을 연결합니다. 인식 영역을 선택하면 강화 옵션이 자동으로 계산기에 입력됩니다.",
     idle: "연결되지 않음",
     start: "화면 공유 시작",
     stop: "공유 종료",
