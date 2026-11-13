@@ -73,6 +73,19 @@
             </select>
           </label>
         </div>
+        <div class="ocr-capture-settings">
+          <label class="ocr-mode-field">
+            <span data-ocr-text="zoomLabel">화면 확대</span>
+            <select id="ocr-preview-zoom">
+              <option value="1" data-ocr-text="zoomFit" selected>기본 크기</option>
+              <option value="1.5">150%</option>
+              <option value="2">200%</option>
+            </select>
+          </label>
+          <label class="ocr-checkbox"><input type="checkbox" id="ocr-precision" />
+            <span data-ocr-text="precision">정밀 인식 (5줄 각각 분석, 느림)</span>
+          </label>
+        </div>
         <div class="ocr-preview-frame">
           <canvas id="ocr-preview" width="960" height="540" aria-label="드래그하여 인식 영역을 선택할 게임 화면 미리보기"></canvas>
         </div>
