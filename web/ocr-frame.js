@@ -41,6 +41,13 @@ export function createFrameThrottle({ maxScansPerView = 2 } = {}) {
       scansOfView++;
       return true;
     },
+    // Require meaningful optical change before another DIFFERENT OCR value
+    // can create a row. Small capture jitter must not advance the counter.
+    canAdvance(frame) {
+      if (!appliedView || !frame?.length) return true;
+      const difference = frameDifference(appliedView, frame);
+      return difference.changedRatio >= 0.015 && difference.meanDifference >= 2.6;
+    },
     applied(frame) {
       appliedView = frame?.slice() ?? null;
     },
