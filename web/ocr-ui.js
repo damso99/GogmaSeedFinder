@@ -1235,7 +1235,6 @@ export function initializeOcrUi(doc = document) {
     pauseButton.textContent = paused ? translations.resume : translations.pause;
     setStatus(paused ? translations.paused : region ? translations.reading : translations.selectArea);
     updateWildsProgress();
-    if (!paused && wildsCheck?.checked) void scanWildsQueue();
   });
   applyButton.addEventListener("click", () => {
     if (lastResult?.complete && applyResult(lastResult, true) && wildsCheck?.checked) {
