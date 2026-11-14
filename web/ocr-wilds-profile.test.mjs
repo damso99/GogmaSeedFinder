@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   WILDS_GOGMA_ROI, supportsWildsGogmaProfile, measureWildsResultSignal,
-  createWildsResultTracker, wildsFrameQuality,
+  createWildsResultTracker, wildsFrameQuality, isolateWildsGreenText,
 } from "./ocr-wilds-profile.js";
 
 test("preset addresses the Korean 16:9 right-hand restoration bonus panel", () => {
@@ -71,4 +71,21 @@ test("white glare is penalized compared with unclipped lettering", () => {
   const clear={data:new Uint8ClampedArray([15,90,30,255,30,190,60,255,15,90,30,255,30,190,60,255])};
   const glare={data:new Uint8ClampedArray([255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255])};
   assert.ok(wildsFrameQuality(clear)>wildsFrameQuality(glare));
+});
+
+test("game green text isolation removes blue patterns and yellow translucent background", () => {
+  const data=new Uint8ClampedArray([
+    66,205,67,255,  // actual green letter
+    35,60,165,255,  // blue HUD texture
+    195,185,37,255, // gold background
+    255,255,255,255 // temporary white highlight uses fallback
+  ]);
+  const image={data};
+  assert.equal(isolateWildsGreenText(image),image);
+  assert.deepEqual([...image.data],[
+    0,0,0,255,
+    255,255,255,255,
+    255,255,255,255,
+    255,255,255,255,
+  ]);
 });
