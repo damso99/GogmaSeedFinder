@@ -536,3 +536,19 @@ test("recorded-game profile does not insert results with inconsistent OCR votes"
   assert.ok(s.observed.length<=1);
   s.ui.stop();
 });
+
+test("retry after a recorded Wilds result does not create another row", async () => {
+  const options = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(options);
+  s.video.videoWidth=1920; s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  s.setWildsVisible(true);
+  for(let i=0;i<13;i++)s.ui.preview();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  s.nodes["ocr-retry"].click();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  s.ui.stop();
+});
