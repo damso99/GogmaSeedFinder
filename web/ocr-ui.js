@@ -9,6 +9,11 @@ import { recognizeResultRows } from "./ocr-lines.js";
 import { loadOcrSnapshots, lastSavedOcrSignature } from "./ocr-observation-store.js";
 import { createRollEventDetector } from "./ocr-roll-event.js";
 import { createOcrConsensus } from "./ocr-consensus.js";
+import {
+  WILDS_GOGMA_ROI, WILDS_GOGMA_SIGNAL,
+  supportsWildsGogmaProfile, measureWildsResultSignal,
+  createWildsResultTracker, wildsFrameQuality,
+} from "./ocr-wilds-profile.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1200;
@@ -23,6 +28,14 @@ const TEXT = {
     modeLabel: "인식 대상",
     zoomLabel: "인식 영역 확대",
     zoomFit: "화면에 맞춤",
+    wildsProfile: "실제 영상 기준 복원 감지 (16:9, 시험 기능)",
+    wildsIdle: "영상 기준 프리셋 꺼짐 · 기존 OCR 모드",
+    wildsUnsupported: "이 프리셋은 게임 창이 화면 전체를 차지하는 16:9 캡처에서 사용하세요.",
+    wildsUnknown: "????? 상태 감시 중 · 복원 결과가 표시되면 자동 캡처",
+    wildsRevealed: "복원 결과 표시 감지 · 선명한 원본 화면 저장 중",
+    wildsReading: "복원 화면 저장 완료 · 결과 분석 중",
+    wildsComplete: "복원 결과 자동 입력 완료 · 다음 결과 대기",
+    wildsFailed: "저장된 복원 화면에서 옵션 5개를 확정하지 못했습니다. 영역과 보정 이미지를 확인하세요.",
     eventMode: "복원 이벤트 추적 + 다중 프레임 인식 (시험 기능)",
     eventIdle: "이벤트 추적 비활성 · 기존 OCR 방식 사용",
     eventInitial: "이벤트 감시: 첫 결과 화면이 안정화되기를 기다리는 중",
@@ -68,6 +81,14 @@ const TEXT = {
     modeLabel: "Recognition target",
     zoomLabel: "Preview zoom",
     zoomFit: "Fit width",
+    wildsProfile: "Recorded Wilds reroll detection (16:9, experimental)",
+    wildsIdle: "Recorded game profile off",
+    wildsUnsupported: "Use a 16:9 capture with the game filling the window.",
+    wildsUnknown: "Watching ????? placeholders for the next roll",
+    wildsRevealed: "Roll revealed · freezing source frames",
+    wildsReading: "Reading saved game frames",
+    wildsComplete: "Restoration recorded · awaiting next result",
+    wildsFailed: "Could not verify all five slots; inspect the capture.",
     eventMode: "Track reroll event + multi-frame OCR (experimental)",
     eventIdle: "Event tracking off · original OCR mode",
     eventInitial: "Waiting for the first stable result",
@@ -113,6 +134,14 @@ const TEXT = {
     modeLabel: "認識対象",
     zoomLabel: "プレビュー拡大",
     zoomFit: "幅に合わせる",
+    wildsProfile: "実映像に基づく結果検出（16:9、試験）",
+    wildsIdle: "映像プリセット無効",
+    wildsUnsupported: "ゲーム全画面の16:9映像を共有してください。",
+    wildsUnknown: "????? 表示を監視中",
+    wildsRevealed: "復元結果を検出 · 画像保存中",
+    wildsReading: "保存した画像を認識中",
+    wildsComplete: "復元結果を記録済み",
+    wildsFailed: "5項目を確認できませんでした。",
     eventMode: "再抽選イベント追跡 + 複数フレーム認識（試験）",
     eventIdle: "イベント追跡オフ",
     eventInitial: "最初の安定した画面を待機中",
@@ -158,6 +187,14 @@ const TEXT = {
     modeLabel: "辨識目標",
     zoomLabel: "預覽放大",
     zoomFit: "符合寬度",
+    wildsProfile: "實際影片還原偵測（16:9，實驗）",
+    wildsIdle: "錄影預設關閉",
+    wildsUnsupported: "請使用遊戲填滿畫面的 16:9 影像。",
+    wildsUnknown: "正在監看 ????? 狀態",
+    wildsRevealed: "偵測到新結果，擷取畫面",
+    wildsReading: "辨識已儲存的畫面",
+    wildsComplete: "結果已記錄",
+    wildsFailed: "無法確認全部五個選項。",
     eventMode: "追蹤重抽事件 + 多影格辨識（實驗）",
     eventIdle: "事件追蹤關閉",
     eventInitial: "等待第一個穩定畫面",
@@ -244,6 +281,8 @@ export function initializeOcrUi(doc = document) {
   const zoomSelect = $("#ocr-preview-zoom");
   const precisionCheck = $("#ocr-precision");
   const eventModeCheck = $("#ocr-event-mode");
+  const wildsCheck = $("#ocr-wilds-profile");
+  const wildsStatus = $("#ocr-wilds-status");
   const eventStatus = $("#ocr-event-state");
   const autoCheck = $("#ocr-auto");
   const resetButton = $("#ocr-reset-area");
@@ -272,6 +311,11 @@ export function initializeOcrUi(doc = document) {
   const frameStable = stabilizeTransition({ stableFrames: 2 });
   const rollEvents = createRollEventDetector();
   const consensus = createOcrConsensus({ windowSize: 5, minVotes: 2 });
+  const wildsTracker = createWildsResultTracker();
+  const wildsProbe = doc.createElement("canvas");
+  wildsProbe.width = 140;
+  wildsProbe.height = 150;
+  const wildsProbeContext = wildsProbe.getContext("2d", { willReadFrequently: true });
   const regions = getStoredRegions();
   const sequencers = {
     gogma: createOcrSequencer(),
@@ -301,6 +345,11 @@ export function initializeOcrUi(doc = document) {
   let currentFrame = null;
   let activeEventId = 0;
   let committedEventId = 0;
+  let wildsQueue = [];
+  let wildsCaptures = [];
+  let wildsEnqueuedId = 0;
+  let wildsCompletedId = 0;
+  let wildsLastBatch = null;
   let region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
   let pointerOrigin = null;
   let pointerRegion = null;
