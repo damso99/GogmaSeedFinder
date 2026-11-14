@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   WILDS_GOGMA_ROI, supportsWildsGogmaProfile, measureWildsResultSignal,
-  createWildsResultTracker, wildsFrameQuality, isolateWildsGreenText,
+  createWildsResultTracker, wildsFrameQuality, isolateWildsGreenText, isolateWildsColoredText,
 } from "./ocr-wilds-profile.js";
 
 test("preset addresses the Korean 16:9 right-hand restoration bonus panel", () => {
@@ -83,6 +83,24 @@ test("game green text isolation removes blue patterns and yellow translucent bac
   const image={data};
   assert.equal(isolateWildsGreenText(image),image);
   assert.deepEqual([...image.data],[
+    0,0,0,255,
+    255,255,255,255,
+    255,255,255,255,
+    255,255,255,255,
+  ]);
+});
+
+test("red and green bonus glyphs survive together, while blue UI and gold background do not", () => {
+  const frame = { data:new Uint8ClampedArray([
+    66,205,67,255,
+    226,62,65,255,
+    35,60,165,255,
+    195,185,37,255,
+    255,255,255,255
+  ]) };
+  isolateWildsColoredText(frame);
+  assert.deepEqual([...frame.data], [
+    0,0,0,255,
     0,0,0,255,
     255,255,255,255,
     255,255,255,255,
