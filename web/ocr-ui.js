@@ -662,7 +662,8 @@ export function initializeOcrUi(doc = document) {
       context.strokeStyle = "#f0d27c";
       context.strokeRect(x, y, w, h);
     }
-    if (eventModeCheck?.checked && !pointerOrigin && validRegion(region)) {
+    if (wildsCheck?.checked) monitorWildsPreview();
+    else if (eventModeCheck?.checked && !pointerOrigin && validRegion(region)) {
       monitorRollFrame(snapshotRegion());
     }
   }
@@ -828,6 +829,7 @@ export function initializeOcrUi(doc = document) {
   }
 
   async function scan() {
+    if (wildsCheck?.checked) return scanWildsQueue();
     if (running || paused || !video || !region || video.readyState < 2) return;
     const epoch = session;
     running = true;
@@ -1002,6 +1004,8 @@ export function initializeOcrUi(doc = document) {
     panel.hidden = false;
     paused = false;
     pauseButton.textContent = translations.pause;
+    resetWildsTracking();
+    if (wildsCheck?.checked) setWildsProfileRegion();
     resetReading({ keepRecognized: true });
     previewTimer = window.setInterval(drawPreview, PREVIEW_INTERVAL_MS);
     scanTimer = window.setInterval(() => { void scan(); }, OCR_INTERVAL_MS);
@@ -1028,13 +1032,33 @@ export function initializeOcrUi(doc = document) {
 
   modeSelect.addEventListener("change", () => {
     session++;
+    if (modeSelect.value !== "gogma" && wildsCheck?.checked) {
+      wildsCheck.checked = false;
+      resetWildsTracking();
+    }
     region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
     sequencers[modeSelect.value].clearPending();
     resetEventTracking();
     resetReading();
   });
+  wildsCheck?.addEventListener("change", () => {
+    session++;
+    if (wildsCheck.checked) {
+      modeSelect.value = "gogma";
+      if (eventModeCheck) eventModeCheck.checked = false;
+      resetEventTracking();
+      setWildsProfileRegion();
+    }
+    resetWildsTracking();
+    sequencers[modeSelect.value].clearPending();
+    resetReading({ keepRecognized: true });
+  });
   eventModeCheck?.addEventListener("change", () => {
     session++;
+    if (eventModeCheck.checked && wildsCheck?.checked) {
+      wildsCheck.checked = false;
+      resetWildsTracking();
+    }
     sequencers[modeSelect.value].clearPending();
     resetEventTracking();
     resetReading({ keepRecognized: true });
@@ -1054,6 +1078,10 @@ export function initializeOcrUi(doc = document) {
   });
   resetButton.addEventListener("click", () => {
     session++;
+    if (wildsCheck?.checked) {
+      wildsCheck.checked = false;
+      resetWildsTracking();
+    }
     region = null;
     delete regions[modeSelect.value];
     try { localStorage.setItem(REGIONS_STORAGE_KEY, JSON.stringify(regions)); } catch {}
@@ -1063,6 +1091,10 @@ export function initializeOcrUi(doc = document) {
   });
   retryButton?.addEventListener("click", () => {
     session++;
+    if (wildsCheck?.checked && wildsLastBatch) {
+      wildsQueue.push(wildsLastBatch);
+      wildsCompletedId = Math.min(wildsCompletedId, wildsLastBatch.id - 1);
+    }
     sequencers[modeSelect.value].clearPending();
     resetReading({ keepRecognized: true });
   });
@@ -1089,7 +1121,7 @@ export function initializeOcrUi(doc = document) {
     if (video) start();
   });
   doc.addEventListener("gogma:screen-share-stopped", stop);
-  return { scan, stop };
+  return { scan, stop, preview: drawPreview };
 }
 
 initializeOcrUi();
