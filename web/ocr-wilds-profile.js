@@ -78,7 +78,7 @@ export function isolateWildsColoredText(imageData) {
       if (high === r) hue = 60 * (((g-b)/diff + 6) % 6);
       else if (high === g) hue = 60 * ((b-r)/diff + 2);
       else hue = 60 * ((r-g)/diff + 4);
-      ink = (hue >= 64 && hue <= 196) || hue <= 28 || hue >= 338;
+      ink = (hue >= 64 && hue <= 196) || hue <= 18 || hue >= 340;
     }
     pixels[p] = pixels[p+1] = pixels[p+2] = ink ? 0 : 255;
     pixels[p+3] = 255;
