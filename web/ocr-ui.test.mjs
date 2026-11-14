@@ -625,3 +625,49 @@ test("failed Wilds OCR is retained for review and can retry the same captured im
   assert.equal(s.observed.length,1);
   s.ui.stop();
 });
+
+
+test("two restoration results captured during pause are processed FIFO after resume", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup(text);
+  s.video.videoWidth=1920;s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  s.nodes["ocr-toggle-pause"].click();
+  for(let event=0;event<2;event++) {
+    s.setWildsVisible(false);
+    for(let n=0;n<5;n++)s.ui.preview();
+    s.setWildsVisible(true);
+    for(let n=0;n<13;n++)s.ui.preview();
+  }
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("대기 2"));
+  await s.ui.scan();
+  assert.equal(s.observed.length,0);
+  s.nodes["ocr-toggle-pause"].click();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length,2);
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("완료 2"));
+  s.ui.stop();
+});
+
+test("manual confirmation marks the recognized review item as done", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup(text);
+  s.video.videoWidth=1920;s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  s.nodes["ocr-auto"].checked=false;
+  s.setWildsVisible(true);
+  for(let n=0;n<13;n++)s.ui.preview();
+  await s.ui.scan();
+  assert.equal(s.observed.length,0);
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("확인 필요 1"));
+  s.nodes["ocr-apply-once"].click();
+  assert.equal(s.observed.length,1);
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("완료 1"));
+  s.nodes["ocr-retry"].click();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  s.ui.stop();
+});
