@@ -32,7 +32,9 @@ export function createWildsOcrQueue({ maxActive = 8, maxHistory = 20 } = {}) {
     return batch;
   }
   function rollback(id) {
-    const batch = entries.find(x => x.id === id);
+    // Passing the in-flight object guards against stale workers from an old
+    // screen-share session changing a new event with a reused numeric ID.
+    const batch = entries.find(x => typeof id === "object" ? x === id : x.id === id);
     if (!batch || batch.status !== "processing") return false;
     batch.status = "pending";
     return true;
@@ -57,6 +59,16 @@ export function createWildsOcrQueue({ maxActive = 8, maxHistory = 20 } = {}) {
     batch.message = "";
     return true;
   }
+  function confirmReview(id) {
+    const batch = entries.find(x => x.id === id);
+    if (!batch || batch.status !== "review") return false;
+    batch.status = "done";
+    batch.recognized = 5;
+    batch.snapshots = [];
+    completed++;
+    compact();
+    return true;
+  }
   function clear() { entries = []; completed = 0; dropped = 0; }
   function counts() {
     return {
@@ -69,5 +81,5 @@ export function createWildsOcrQueue({ maxActive = 8, maxHistory = 20 } = {}) {
   function history() {
     return entries.map(x => ({ id: x.id, status: x.status, recognized: x.recognized, message: x.message }));
   }
-  return { enqueue, begin, rollback, finish, retry, clear, counts, history };
+  return { enqueue, begin, rollback, finish, confirmReview, retry, clear, counts, history };
 }
