@@ -481,7 +481,9 @@ export function initializeOcrUi(doc = document) {
       // Prefer snapshots where glow has subsided. The source pixels remain
       // available after the green result disappears from the game.
       const ordered = [...batch.snapshots].sort((a, b) => b.quality - a.quality);
+      let snapshotIndex = 0;
       for (const screenshot of ordered) {
+        snapshotIndex++;
         const first = await worker.recognize(screenshot.enhanced);
         if (epoch !== session || !video) return;
         let chosen = first;
@@ -496,6 +498,21 @@ export function initializeOcrUi(doc = document) {
             result = altResult;
             confidence = alternative.confidence;
             chosen = fallback;
+          }
+        }
+        // If requested, use the original single-row OCR on the two cleanest
+        // frozen frames. Never split moving video frames during animation.
+        if (!result.complete && precisionCheck?.checked && snapshotIndex <= 2) {
+          const precise = await recognizeResultRows(worker, doc, screenshot.enhanced, "gogma");
+          if (epoch !== session || !video) return;
+          if (precise) {
+            const rowResult = parseOcrResult("gogma", precise?.data?.text ?? "");
+            const alt = { result: rowResult, confidence: Number(precise?.data?.confidence) || 0 };
+            if (bestOcrCandidate({ result, confidence }, alt) === alt) {
+              result = rowResult;
+              confidence = alt.confidence;
+              chosen = precise;
+            }
           }
         }
         const candidate = { result, confidence, rawText: chosen?.data?.text ?? "" };
