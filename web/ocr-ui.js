@@ -373,6 +373,7 @@ export function initializeOcrUi(doc = document) {
   let wildsEnqueuedId = 0;
   let wildsAppliedIds = new Set();
   let wildsLastBatch = null;
+  let wildsLastRecognizedId = 0;
   let region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
   let pointerOrigin = null;
   let pointerRegion = null;
@@ -449,6 +450,7 @@ export function initializeOcrUi(doc = document) {
     wildsEnqueuedId = 0;
     wildsAppliedIds = new Set();
     wildsLastBatch = null;
+    wildsLastRecognizedId = 0;
     updateWildsProgress();
     if (wildsStatus) wildsStatus.textContent = wildsCheck?.checked
       ? translations.wildsUnknown : translations.wildsIdle;
@@ -613,46 +615,62 @@ export function initializeOcrUi(doc = document) {
         lastResult = result;
         lastConfidence = confidence;
         displayedConfidence = confidence;
+        wildsLastRecognizedId = batch.id;
         applyButton.disabled = false;
         const text = strongest?.rawText?.trim() || result.ids.join(" / ");
         output.textContent = text + "\n\n[5/5] " + result.ids.join(" / ");
-        // Never re-add the previous confirmed roll merely from reconnecting.
-        // Genuine later events can have the same options and still count.
         const repeatedOnReconnect = batch.id === 1
           && sequencers.gogma.alreadyApplied(result.signature);
-        if (autoCheck.checked && confidence >= MIN_AUTO_CONFIDENCE
-          && !repeatedOnReconnect && !wildsAppliedIds.has(batch.id)) {
+        if (repeatedOnReconnect || wildsAppliedIds.has(batch.id)) {
+          wildsTasks.finish(batch.id, "done", { recognized: 5 });
+          setStatus(translations.duplicate);
+        } else if (autoCheck.checked && confidence >= MIN_AUTO_CONFIDENCE) {
           currentFrame = snapshotRegion();
           const applied = applyResult(result);
-          if (applied) wildsAppliedIds.add(batch.id);
-          if (wildsStatus) wildsStatus.textContent = applied
-            ? translations.wildsComplete : translations.wildsFailed;
-        } else if (repeatedOnReconnect || wildsAppliedIds.has(batch.id)) {
-          setStatus(translations.duplicate);
-          if (wildsStatus) wildsStatus.textContent = translations.wildsComplete;
+          if (applied) {
+            wildsAppliedIds.add(batch.id);
+            wildsTasks.finish(batch.id, "done", { recognized: 5 });
+          } else {
+            wildsTasks.finish(batch.id, "review", { recognized: 5, message: translations.noApp });
+          }
         } else {
+          wildsTasks.finish(batch.id, "review", { recognized: 5,
+            message: confidence < MIN_AUTO_CONFIDENCE ? translations.lowConfidence : translations.ready });
           setStatus(confidence < MIN_AUTO_CONFIDENCE
             ? translations.lowConfidence + " (" + Math.round(confidence) + "%)"
             : translations.ready + result.ids.join(" / "));
         }
       } else {
+        const recognized = strongest?.result?.recognized ?? 0;
         if (strongest && (!lastResult?.complete || strongest.result.complete)) {
           lastResult = strongest.result;
           lastConfidence = strongest.confidence;
+          wildsLastRecognizedId = batch.id;
           output.textContent = (strongest.rawText.trim() || "—") +
-            "\n\n[" + strongest.result.recognized + "/5] " +
-            strongest.result.labels.join(" / ");
+            "\n\n[" + recognized + "/5] " + strongest.result.labels.join(" / ");
           applyButton.disabled = !strongest.result.complete;
         }
+        wildsTasks.finish(batch.id, "review", {
+          recognized, message: translations.wildsFailed,
+        });
         setStatus(translations.wildsFailed);
-        if (wildsStatus) wildsStatus.textContent = translations.wildsFailed;
       }
     } catch (error) {
-      if (epoch === session && !hasRecordedResult()) {
-        setStatus(translations.failure + " " + (error?.message ?? ""), "error");
+      if (epoch === session) {
+        wildsTasks.finish(batch.id, "review", {
+          recognized: 0,
+          message: translations.failure + " " + (error?.message ?? ""),
+        });
+        if (!hasRecordedResult()) {
+          setStatus(translations.failure + " " + (error?.message ?? ""), "error");
+        }
       }
     } finally {
+      // A pause, setting change, or screen-share change invalidates the OCR
+      // pass, but its frozen source images remain available for resume.
+      wildsTasks.rollback(batch);
       running = false;
+      updateWildsProgress();
     }
   }
 
@@ -1205,8 +1223,8 @@ export function initializeOcrUi(doc = document) {
     session++;
     if (wildsCheck?.checked && wildsLastBatch
       && !wildsAppliedIds.has(wildsLastBatch.id)) {
-      wildsQueue.push(wildsLastBatch);
-      wildsCompletedId = Math.min(wildsCompletedId, wildsLastBatch.id - 1);
+      wildsTasks.retry(wildsLastBatch.id);
+      updateWildsProgress();
     }
     sequencers[modeSelect.value].clearPending();
     resetReading({ keepRecognized: true });
@@ -1216,9 +1234,16 @@ export function initializeOcrUi(doc = document) {
     if (paused) session++;
     pauseButton.textContent = paused ? translations.resume : translations.pause;
     setStatus(paused ? translations.paused : region ? translations.reading : translations.selectArea);
+    updateWildsProgress();
+    if (!paused && wildsCheck?.checked) void scanWildsQueue();
   });
   applyButton.addEventListener("click", () => {
-    if (lastResult?.complete) applyResult(lastResult, true);
+    if (lastResult?.complete && applyResult(lastResult, true) && wildsCheck?.checked) {
+      if (wildsTasks.confirmReview(wildsLastRecognizedId)) {
+        wildsAppliedIds.add(wildsLastRecognizedId);
+        updateWildsProgress();
+      }
+    }
   });
   for (const selector of ["#weapon-type", "#attribute-force",
     "#artian-search-weapon-type", "#artian-search-attribute-force"]) {
