@@ -96,12 +96,14 @@ test("red and green bonus glyphs survive together, while blue UI and gold backgr
     226,62,65,255,
     35,60,165,255,
     195,185,37,255,
+    193,97,31,255, // warm orange scenery is not red option text
     255,255,255,255
   ]) };
   isolateWildsColoredText(frame);
   assert.deepEqual([...frame.data], [
     0,0,0,255,
     0,0,0,255,
+    255,255,255,255,
     255,255,255,255,
     255,255,255,255,
     255,255,255,255,
