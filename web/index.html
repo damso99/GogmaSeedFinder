@@ -83,6 +83,9 @@
               <option value="2">200%</option>
             </select>
           </label>
+          <label class="ocr-checkbox"><input type="checkbox" id="ocr-wilds-profile" />
+            <span data-ocr-text="wildsProfile">영상 기준 거극 복원 감지 (1920×1080·16:9, 시험 기능)</span>
+          </label>
           <label class="ocr-checkbox"><input type="checkbox" id="ocr-event-mode" />
             <span data-ocr-text="eventMode">복원 이벤트 추적 + 다중 프레임 인식 (시험 기능)</span>
           </label>
@@ -103,6 +106,7 @@
           <button type="button" id="ocr-toggle-pause" class="secondary" data-ocr-text="pause">인식 일시정지</button>
           <button type="button" id="ocr-apply-once" class="primary" disabled data-ocr-text="applyOnce">인식 결과 한 번 입력</button>
         </div>
+        <p class="ocr-event-state" id="ocr-wilds-status" aria-live="polite" data-ocr-text="wildsIdle">실제 게임 영상 기준 프리셋 비활성</p>
         <p class="ocr-event-state" id="ocr-event-state" aria-live="polite" data-ocr-text="eventIdle">이벤트 추적 기능 비활성</p>
         <p class="ocr-status" id="ocr-status" role="status" aria-live="polite" data-ocr-text="selectArea">미리보기에서 새 복원 결과가 표시되는 위치만 드래그하세요.</p>
         <div class="ocr-output">
