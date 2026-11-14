@@ -3654,3 +3654,73 @@ button:disabled {
 }
 .ocr-wilds-history { white-space: pre-wrap; max-height: 132px; overflow: auto; }
 .ocr-wilds-progress[hidden], .ocr-wilds-history[hidden] { display: none; }
+
+/* Progressive disclosure: everyday OCR actions stay visible, diagnostics stay tucked away. */
+.ocr-primary-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 13px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  background: #171b15;
+  border-radius: 10px;
+}
+.ocr-primary-controls button,
+.ocr-result-heading button,
+.ocr-detail-actions button {
+  min-height: 38px;
+  border-radius: 9px;
+  padding: 8px 13px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+#ocr-wilds-option[hidden],
+#ocr-wilds-status[hidden],
+#ocr-event-state[hidden] { display: none; }
+.ocr-panel > .ocr-status { margin-top: 0; }
+.ocr-panel > .ocr-event-state,
+.ocr-panel > .ocr-wilds-progress { margin-top: 8px; }
+.ocr-result-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.ocr-result-heading strong { margin-bottom: 0; }
+.ocr-result-heading button:disabled { opacity: .48; cursor: default; }
+.ocr-simple-details {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #171b15;
+  padding: 11px 13px;
+}
+.ocr-simple-details > summary {
+  cursor: pointer;
+  color: #e7e0cc;
+  font-weight: 750;
+  font-size: .83rem;
+  line-height: 1.6;
+}
+.ocr-simple-details[open] > summary { margin-bottom: 12px; }
+.ocr-simple-details .ocr-preview-frame { max-height: 56vh; }
+.ocr-detail-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.ocr-simple-details .ocr-controls { margin-top: 4px; }
+.ocr-simple-details .ocr-capture-settings { margin-top: 8px; }
+.ocr-simple-details .ocr-hint { margin-bottom: 0; }
+@media (max-width: 720px) {
+  .ocr-primary-controls { align-items: stretch; }
+  .ocr-primary-controls button { flex: 1 1 130px; }
+  .ocr-result-heading button { flex: 1 1 auto; }
+}
