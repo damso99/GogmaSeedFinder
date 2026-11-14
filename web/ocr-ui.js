@@ -9,7 +9,7 @@ import { recognizeResultRows } from "./ocr-lines.js";
 import { loadOcrSnapshots, lastSavedOcrSignature } from "./ocr-observation-store.js";
 import { createRollEventDetector } from "./ocr-roll-event.js";
 import { createOcrConsensus } from "./ocr-consensus.js";
-import { WILDS_GOGMA_ROI, WILDS_GOGMA_SIGNAL, supportsWildsGogmaProfile, measureWildsResultSignal, createWildsResultTracker, wildsFrameQuality } from "./ocr-wilds-profile.js";
+import { WILDS_GOGMA_ROI, WILDS_GOGMA_SIGNAL, supportsWildsGogmaProfile, measureWildsResultSignal, createWildsResultTracker, wildsFrameQuality, isolateWildsGreenText } from "./ocr-wilds-profile.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1200;
@@ -419,10 +419,11 @@ export function initializeOcrUi(doc = document) {
   function captureWildsSnapshot() {
     const original = cloneOcrCanvas(captureRegion("original"));
     const enhanced = cloneOcrCanvas(captureRegion("enhanced"));
-    if (!enhanced || !original) return null;
+    const green = cloneOcrCanvas(captureRegion("wilds-green"));
+    if (!enhanced || !original || !green) return null;
     const pixels = original.getContext("2d", { willReadFrequently: true })
       .getImageData(0, 0, original.width, original.height);
-    return { enhanced, original, quality: wildsFrameQuality(pixels) };
+    return { green, enhanced, original, quality: wildsFrameQuality(pixels) };
   }
 
   function monitorWildsPreview() {
@@ -484,13 +485,13 @@ export function initializeOcrUi(doc = document) {
       let snapshotIndex = 0;
       for (const screenshot of ordered) {
         snapshotIndex++;
-        const first = await worker.recognize(screenshot.enhanced);
+        const first = await worker.recognize(screenshot.green);
         if (epoch !== session || !video) return;
         let chosen = first;
         let result = parseOcrResult("gogma", first?.data?.text ?? "");
         let confidence = Number(first?.data?.confidence) || 0;
         if (!result.complete) {
-          const fallback = await worker.recognize(screenshot.original);
+          const fallback = await worker.recognize(screenshot.enhanced);
           if (epoch !== session || !video) return;
           const altResult = parseOcrResult("gogma", fallback?.data?.text ?? "");
           const alternative = { result: altResult, confidence: Number(fallback?.data?.confidence) || 0 };
@@ -513,6 +514,17 @@ export function initializeOcrUi(doc = document) {
               confidence = alt.confidence;
               chosen = precise;
             }
+          }
+        }
+        if (!result.complete) {
+          const originalRead = await worker.recognize(screenshot.original);
+          if (epoch !== session || !video) return;
+          const originalResult = parseOcrResult("gogma", originalRead?.data?.text ?? "");
+          const alternative = { result: originalResult, confidence: Number(originalRead?.data?.confidence) || 0 };
+          if (bestOcrCandidate({ result, confidence }, alternative) === alternative) {
+            result = originalResult;
+            confidence = alternative.confidence;
+            chosen = originalRead;
           }
         }
         const candidate = { result, confidence, rawText: chosen?.data?.text ?? "" };
@@ -732,7 +744,11 @@ export function initializeOcrUi(doc = document) {
     workContext.drawImage(video, left, top, width, height,
       padding, padding, renderedWidth, renderedHeight);
 
-    if (preprocess === "enhanced" || preprocess === "adaptive") {
+    if (preprocess === "wilds-green") {
+      const pixels = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
+      isolateWildsGreenText(pixels);
+      workContext.putImageData(pixels, padding, padding);
+    } else if (preprocess === "enhanced" || preprocess === "adaptive") {
       const image = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
       if (preprocess === "adaptive") removeVariableBackground(image);
       else enhanceOcrImageData(image);
