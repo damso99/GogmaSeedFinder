@@ -385,6 +385,174 @@ export function initializeOcrUi(doc = document) {
     return state;
   }
 
+  function resetWildsTracking() {
+    wildsTracker.reset();
+    wildsQueue = [];
+    wildsCaptures = [];
+    wildsEnqueuedId = 0;
+    wildsCompletedId = 0;
+    wildsLastBatch = null;
+    if (wildsStatus) wildsStatus.textContent = wildsCheck?.checked
+      ? translations.wildsUnknown : translations.wildsIdle;
+  }
+
+  function setWildsProfileRegion() {
+    if (!video?.videoWidth || !video?.videoHeight
+      || !supportsWildsGogmaProfile(video.videoWidth, video.videoHeight)) {
+      if (wildsStatus) wildsStatus.textContent = translations.wildsUnsupported;
+      return false;
+    }
+    region = { ...WILDS_GOGMA_ROI };
+    regions.gogma = region;
+    try { localStorage.setItem(REGIONS_STORAGE_KEY, JSON.stringify(regions)); } catch {}
+    return true;
+  }
+
+  function cloneOcrCanvas(source) {
+    if (!source) return null;
+    const copy = doc.createElement("canvas");
+    copy.width = source.width;
+    copy.height = source.height;
+    const ctx = copy.getContext("2d");
+    ctx.drawImage(source, 0, 0);
+    return copy;
+  }
+
+  function captureWildsSnapshot() {
+    const enhanced = cloneOcrCanvas(captureRegion("enhanced"));
+    const original = cloneOcrCanvas(captureRegion("original"));
+    if (!enhanced || !original) return null;
+    const pixels = original.getContext("2d", { willReadFrequently: true })
+      .getImageData(0, 0, original.width, original.height);
+    return { enhanced, original, quality: wildsFrameQuality(pixels) };
+  }
+
+  function monitorWildsPreview() {
+    if (!wildsCheck?.checked || modeSelect.value !== "gogma" || !video
+      || video.readyState < 2) return;
+    if (!supportsWildsGogmaProfile(video.videoWidth, video.videoHeight)) {
+      if (wildsStatus) wildsStatus.textContent = translations.wildsUnsupported;
+      return;
+    }
+    const spec = WILDS_GOGMA_SIGNAL;
+    const x = Math.round(spec.x * video.videoWidth);
+    const y = Math.round(spec.y * video.videoHeight);
+    const w = Math.round(spec.w * video.videoWidth);
+    const h = Math.round(spec.h * video.videoHeight);
+    wildsProbeContext.drawImage(video, x, y, w, h,
+      0, 0, wildsProbe.width, wildsProbe.height);
+    const score = measureWildsResultSignal(
+      wildsProbeContext.getImageData(0, 0, wildsProbe.width, wildsProbe.height),
+    );
+    const state = wildsTracker.observe(score);
+    if (state.newEvent) {
+      wildsCaptures = [];
+      if (wildsStatus) wildsStatus.textContent = translations.wildsRevealed;
+    }
+    if (state.shouldCapture && state.eventId > wildsEnqueuedId) {
+      const screenshot = captureWildsSnapshot();
+      if (screenshot) wildsCaptures.push(screenshot);
+    }
+    if (state.captures >= 4 && wildsCaptures.length >= 2
+      && state.eventId > wildsEnqueuedId) {
+      // The OCR worker receives immutable snapshots, not the live video.
+      const batch = { id: state.eventId, snapshots: wildsCaptures };
+      wildsQueue.push(batch);
+      wildsEnqueuedId = state.eventId;
+      wildsLastBatch = batch;
+      wildsCaptures = [];
+      if (wildsStatus) wildsStatus.textContent = translations.wildsReading;
+    }
+    if (state.phase === "hidden" && wildsQueue.length === 0 && wildsCompletedId === 0
+      && wildsStatus) wildsStatus.textContent = translations.wildsUnknown;
+  }
+
+  async function scanWildsQueue() {
+    if (running || paused || !video || !wildsQueue.length) return;
+    const batch = wildsQueue.shift();
+    if (!batch || batch.id <= wildsCompletedId) return;
+    const epoch = session;
+    running = true;
+    try {
+      if (!workerPromise) setStatus(translations.loading);
+      const worker = await getWorker();
+      if (epoch !== session || !video) return;
+      const voting = createOcrConsensus({ windowSize: 4, minVotes: 2, minimumConfidence: 30 });
+      let final = null;
+      let strongest = null;
+      // Prefer snapshots where glow has subsided. The source pixels remain
+      // available after the green result disappears from the game.
+      const ordered = [...batch.snapshots].sort((a, b) => b.quality - a.quality);
+      for (const screenshot of ordered) {
+        const first = await worker.recognize(screenshot.enhanced);
+        if (epoch !== session || !video) return;
+        let chosen = first;
+        let result = parseOcrResult("gogma", first?.data?.text ?? "");
+        let confidence = Number(first?.data?.confidence) || 0;
+        if (!result.complete) {
+          const fallback = await worker.recognize(screenshot.original);
+          if (epoch !== session || !video) return;
+          const altResult = parseOcrResult("gogma", fallback?.data?.text ?? "");
+          const alternative = { result: altResult, confidence: Number(fallback?.data?.confidence) || 0 };
+          if (bestOcrCandidate({ result, confidence }, alternative) === alternative) {
+            result = altResult;
+            confidence = alternative.confidence;
+            chosen = fallback;
+          }
+        }
+        const candidate = { result, confidence, rawText: chosen?.data?.text ?? "" };
+        if (!strongest || bestOcrCandidate(strongest, candidate) === candidate) strongest = candidate;
+        final = voting.observe(result, confidence);
+        if (final?.result?.complete && final.confidence >= MIN_AUTO_CONFIDENCE) break;
+      }
+      if (epoch !== session || !video) return;
+      wildsCompletedId = batch.id;
+      if (final?.result?.complete) {
+        const result = final.result;
+        const confidence = final.confidence;
+        lastResult = result;
+        lastConfidence = confidence;
+        displayedConfidence = confidence;
+        applyButton.disabled = false;
+        const text = strongest?.rawText?.trim() || result.ids.join(" / ");
+        output.textContent = text + "\n\n[5/5] " + result.ids.join(" / ");
+        // Never re-add the previous confirmed roll merely from reconnecting.
+        // Genuine later events can have the same options and still count.
+        const repeatedOnReconnect = batch.id === 1
+          && sequencers.gogma.alreadyApplied(result.signature);
+        if (autoCheck.checked && confidence >= MIN_AUTO_CONFIDENCE && !repeatedOnReconnect) {
+          currentFrame = snapshotRegion();
+          applyResult(result);
+          if (wildsStatus) wildsStatus.textContent = translations.wildsComplete;
+        } else if (repeatedOnReconnect) {
+          setStatus(translations.duplicate);
+          if (wildsStatus) wildsStatus.textContent = translations.wildsComplete;
+        } else {
+          setStatus(confidence < MIN_AUTO_CONFIDENCE
+            ? translations.lowConfidence + " (" + Math.round(confidence) + "%)"
+            : translations.ready + result.ids.join(" / "));
+        }
+      } else {
+        if (strongest && (!lastResult?.complete || strongest.result.complete)) {
+          lastResult = strongest.result;
+          lastConfidence = strongest.confidence;
+          output.textContent = (strongest.rawText.trim() || "—") +
+            "\n\n[" + strongest.result.recognized + "/5] " +
+            strongest.result.labels.join(" / ");
+          applyButton.disabled = !strongest.result.complete;
+        }
+        setStatus(translations.wildsFailed);
+        if (wildsStatus) wildsStatus.textContent = translations.wildsFailed;
+      }
+    } catch (error) {
+      if (epoch === session && !hasRecordedResult()) {
+        setStatus(translations.failure + " " + (error?.message ?? ""), "error");
+      }
+    } finally {
+      running = false;
+    }
+  }
+
   function hasRecordedResult() {
     return lastResult?.complete
       && sequencers[lastResult.mode]?.alreadyApplied(lastResult.signature);
