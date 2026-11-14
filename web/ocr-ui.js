@@ -408,6 +408,40 @@ export function initializeOcrUi(doc = document) {
     return state;
   }
 
+  function updateWildsProgress() {
+    const enabled = Boolean(wildsCheck?.checked);
+    const data = wildsTasks.counts();
+    if (wildsProgress) {
+      wildsProgress.hidden = !enabled;
+      const labels = translations.wildsCounts;
+      const values = [wildsTracker.getState().eventId, data.pending,
+        data.processing, data.completed, data.review, data.dropped];
+      const message = labels.map((label, index) => label + " " + values[index]).join(" · ");
+      if (wildsProgress.textContent !== message) wildsProgress.textContent = message;
+    }
+    if (wildsHistory) {
+      const entries = wildsTasks.history().slice(-8);
+      wildsHistory.hidden = !enabled || entries.length === 0;
+      const message = entries.map(item =>
+        "#" + item.id + " " + (translations.wildsStates[item.status] ?? item.status)
+        + (item.status === "review" ? " (" + item.recognized + "/5)" : "")
+      ).join(" · ");
+      if (wildsHistory.textContent !== message) wildsHistory.textContent = message;
+    }
+    if (!wildsStatus || !enabled) return;
+    let next;
+    if (data.dropped) next = translations.wildsOverflow;
+    else if (paused) next = translations.wildsPaused;
+    else if (data.processing) next = translations.wildsReading;
+    else if (data.pending) next = translations.wildsQueued;
+    else if (data.review) next = translations.wildsReview;
+    else if (wildsTracker.getState().phase === "revealed"
+      && wildsCaptures.length) next = translations.wildsRevealed;
+    else if (data.completed) next = translations.wildsComplete;
+    else next = translations.wildsUnknown;
+    if (wildsStatus.textContent !== next) wildsStatus.textContent = next;
+  }
+
   function resetWildsTracking() {
     wildsTracker.reset();
     wildsTasks.clear();
@@ -473,7 +507,7 @@ export function initializeOcrUi(doc = document) {
     const state = wildsTracker.observe(score);
     if (state.newEvent) {
       wildsCaptures = [];
-      if (wildsStatus) wildsStatus.textContent = translations.wildsRevealed;
+      updateWildsProgress();
     }
     if (state.shouldCapture && state.eventId > wildsEnqueuedId) {
       const screenshot = captureWildsSnapshot();
@@ -483,20 +517,20 @@ export function initializeOcrUi(doc = document) {
       && state.eventId > wildsEnqueuedId) {
       // The OCR worker receives immutable snapshots, not the live video.
       const batch = { id: state.eventId, snapshots: wildsCaptures };
-      wildsQueue.push(batch);
+      const accepted = wildsTasks.enqueue(batch);
       wildsEnqueuedId = state.eventId;
-      wildsLastBatch = batch;
+      if (accepted) wildsLastBatch = batch;
       wildsCaptures = [];
-      if (wildsStatus) wildsStatus.textContent = translations.wildsReading;
+      updateWildsProgress();
     }
-    if (state.phase === "hidden" && wildsQueue.length === 0 && wildsCompletedId === 0
-      && wildsStatus) wildsStatus.textContent = translations.wildsUnknown;
+    updateWildsProgress();
   }
 
   async function scanWildsQueue() {
-    if (running || paused || !video || !wildsQueue.length) return;
-    const batch = wildsQueue.shift();
-    if (!batch || batch.id <= wildsCompletedId) return;
+    if (running || paused || !video) return;
+    const batch = wildsTasks.begin();
+    if (!batch) return;
+    updateWildsProgress();
     const epoch = session;
     running = true;
     try {
@@ -512,11 +546,24 @@ export function initializeOcrUi(doc = document) {
       let snapshotIndex = 0;
       for (const screenshot of ordered) {
         snapshotIndex++;
-        const first = await worker.recognize(screenshot.green);
+        const first = await worker.recognize(screenshot.colored);
         if (epoch !== session || !video) return;
         let chosen = first;
         let result = parseOcrResult("gogma", first?.data?.text ?? "");
         let confidence = Number(first?.data?.confidence) || 0;
+        if (!result.complete) {
+          // Green-only mode can recover noisy green rows, but may omit red rows.
+          // It is a fallback rather than the first OCR pass.
+          const greenRead = await worker.recognize(screenshot.green);
+          if (epoch !== session || !video) return;
+          const greenResult = parseOcrResult("gogma", greenRead?.data?.text ?? "");
+          const alternative = { result: greenResult, confidence: Number(greenRead?.data?.confidence) || 0 };
+          if (bestOcrCandidate({ result, confidence }, alternative) === alternative) {
+            result = greenResult;
+            confidence = alternative.confidence;
+            chosen = greenRead;
+          }
+        }
         if (!result.complete) {
           const fallback = await worker.recognize(screenshot.enhanced);
           if (epoch !== session || !video) return;
@@ -560,7 +607,6 @@ export function initializeOcrUi(doc = document) {
         if (final?.result?.complete && final.confidence >= MIN_AUTO_CONFIDENCE) break;
       }
       if (epoch !== session || !video) return;
-      wildsCompletedId = batch.id;
       if (final?.result?.complete) {
         const result = final.result;
         const confidence = final.confidence;
