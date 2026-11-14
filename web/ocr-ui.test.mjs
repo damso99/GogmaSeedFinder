@@ -25,6 +25,8 @@ const files = {
     .replace(/^export /gm, ""),
   consensus: readFileSync(new URL("./ocr-consensus.js", import.meta.url), "utf8")
     .replace(/^export /gm, ""),
+  wilds: readFileSync(new URL("./ocr-wilds-profile.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
   ui: readFileSync(new URL("./ocr-ui.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
     .replace(/^export /gm, "")
@@ -34,6 +36,7 @@ const files = {
 function setup(initialText, { savedSnapshots = null } = {}) {
   let frameLevel = 0;
   let minorFlicker = false;
+  let wildsVisible = false;
   class Node {
     constructor(id) {
       this.id = id;
@@ -70,7 +73,13 @@ function setup(initialText, { savedSnapshots = null } = {}) {
       return {
         drawImage() {}, fillRect() {}, strokeRect() {}, putImageData() {},
         getImageData() {
-          const data = new Uint8ClampedArray(node.width === 192 ? 128 : 20);
+          const data = new Uint8ClampedArray(node.width === 192 ? 128
+            : node.width === 140 ? 140 * 150 * 4 : 20);
+          if (node.width === 140 && wildsVisible) {
+            for (let i = 0; i < 1100 * 4; i += 4) {
+              data[i] = 66; data[i + 1] = 205; data[i + 2] = 67; data[i + 3] = 255;
+            }
+          }
           if (node.width === 192) {
             for (let i = 0; i < data.length; i += 4) {
               const pixel = minorFlicker && i === 0 ? frameLevel + 40 : frameLevel;
@@ -85,7 +94,7 @@ function setup(initialText, { savedSnapshots = null } = {}) {
   }
   const names = [
     "ocr-panel", "ocr-preview", "ocr-mode", "ocr-preprocess", "ocr-auto",
-    "ocr-preview-zoom", "ocr-precision", "ocr-event-mode", "ocr-event-state", "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
+    "ocr-preview-zoom", "ocr-precision", "ocr-event-mode", "ocr-event-state", "ocr-wilds-profile", "ocr-wilds-status", "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
     "ocr-recognized", "weapon-type", "attribute-force", "artian-search-weapon-type",
     "artian-search-attribute-force",
   ];
@@ -152,6 +161,7 @@ function setup(initialText, { savedSnapshots = null } = {}) {
   vm.runInContext(files.store, context);
   vm.runInContext(files.event, context);
   vm.runInContext(files.consensus, context);
+  vm.runInContext(files.wilds, context);
   vm.runInContext(files.ui, context);
   const ui = vm.runInContext("initializeOcrUi(document)", context);
   const observed = [];
@@ -169,6 +179,7 @@ function setup(initialText, { savedSnapshots = null } = {}) {
     setReadings(value) { nextReadings = [...value]; },
     setFrame(value) { frameLevel = value; },
     setMinorFlicker(value) { minorFlicker = value; },
+    setWildsVisible(value) { wildsVisible = value; },
     getRecognitionCount: () => recognitionCount,
     getWorkersTerminated: () => workersTerminated,
   };
@@ -461,5 +472,67 @@ test("experimental mode does not auto-fill a single OCR pass", async () => {
   assert.equal(s.observed.length,0);
   await s.ui.scan();
   assert.equal(s.observed.length,1);
+  s.ui.stop();
+});
+
+test("recorded-game profile uses five question-mark states then captures immutable result frames", async () => {
+  const options = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s = setup(options);
+  s.video.videoWidth=1920;
+  s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked = true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({ type:"change" });
+  assert.equal(s.nodes["ocr-event-mode"].checked,false);
+  for(let i=0;i<6;i++) s.ui.preview();
+  await s.ui.scan();
+  assert.equal(s.observed.length,0);
+  s.setWildsVisible(true);
+  for(let i=0;i<13;i++) s.ui.preview();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  assert.deepEqual([...s.observed[0].ids],[8,12,9,15,10]);
+  for(let i=0;i<12;i++) s.ui.preview();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  s.ui.stop();
+});
+
+test("recorded-game profile captures identical results as two different rerolls", async () => {
+  const options="기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup(options);
+  s.video.videoWidth=1920; s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  for(let event=0;event<2;event++) {
+    s.setWildsVisible(false);
+    for(let i=0;i<5;i++)s.ui.preview();
+    s.setWildsVisible(true);
+    for(let i=0;i<13;i++)s.ui.preview();
+    await s.ui.scan();
+  }
+  assert.equal(s.observed.length,2);
+  assert.deepEqual([...s.observed[1].ids],[8,12,9,15,10]);
+  s.ui.stop();
+});
+
+test("recorded-game profile does not insert results with inconsistent OCR votes", async () => {
+  const options="기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const alternative="회심률 강화Ⅲ\n기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅱ\n회심률 강화 EX\n예리도 강화";
+  const s=setup(options);
+  s.video.videoWidth=1920; s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  // Each snapshot gets a different text; no slot reaches two votes.
+  s.setReadings([
+    {text:options,confidence:90},
+    {text:alternative,confidence:90},
+    {text:"알 수 없는 글자",confidence:90},{text:alternative,confidence:90},
+    {text:"알 수 없는 글자",confidence:90},{text:options,confidence:90},
+    {text:"알 수 없는 글자",confidence:90},
+  ]);
+  s.setWildsVisible(true);
+  for(let i=0;i<13;i++)s.ui.preview();
+  await s.ui.scan();
+  assert.ok(s.observed.length<=1);
   s.ui.stop();
 });
