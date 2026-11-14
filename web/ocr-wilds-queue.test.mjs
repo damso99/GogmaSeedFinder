@@ -60,3 +60,28 @@ test("queue bounds history and prevents duplicate event IDs", () => {
   assert.deepEqual(q.history().map(x=>x.id),[4,5,6]);
   assert.equal(q.enqueue(item(6)),false);
 });
+
+test("a stale session cannot roll back another session's same numbered event", () => {
+  const q=createWildsOcrQueue();
+  q.enqueue(item(1));
+  const old=q.begin();
+  q.clear();
+  q.enqueue(item(1));
+  const current=q.begin();
+  assert.equal(q.rollback(old),false);
+  assert.equal(q.counts().processing,1);
+  assert.equal(q.rollback(current),true);
+  assert.equal(q.counts().pending,1);
+});
+
+test("manual confirmation of review completes once and releases its frames", () => {
+  const q=createWildsOcrQueue();
+  q.enqueue(item(1));
+  q.begin();
+  q.finish(1,"review",{recognized:4});
+  assert.equal(q.confirmReview(1),true);
+  assert.equal(q.confirmReview(1),false);
+  assert.equal(q.counts().completed,1);
+  assert.equal(q.counts().review,0);
+  assert.equal(q.retry(1),false);
+});
