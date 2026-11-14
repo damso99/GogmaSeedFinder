@@ -97,7 +97,7 @@ function setup(initialText, { savedSnapshots = null } = {}) {
   }
   const names = [
     "ocr-panel", "ocr-preview", "ocr-mode", "ocr-preprocess", "ocr-auto",
-    "ocr-preview-zoom", "ocr-precision", "ocr-event-mode", "ocr-event-state", "ocr-wilds-profile", "ocr-wilds-status", "ocr-wilds-progress", "ocr-wilds-history", "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
+    "ocr-preview-zoom", "ocr-precision", "ocr-event-mode", "ocr-event-state", "ocr-wilds-profile", "ocr-wilds-option", "ocr-view-details", "ocr-advanced-details", "ocr-wilds-status", "ocr-wilds-progress", "ocr-wilds-history", "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
     "ocr-recognized", "weapon-type", "attribute-force", "artian-search-weapon-type",
     "artian-search-attribute-force",
   ];
@@ -669,5 +669,27 @@ test("manual confirmation marks the recognized review item as done", async () =>
   s.nodes["ocr-retry"].click();
   await s.ui.scan();
   assert.equal(s.observed.length,1);
+  s.ui.stop();
+});
+
+test("compact OCR controls show only mode-relevant game detection and hide inactive status", () => {
+  const s=setup("기초 공격력 강화Ⅱ");
+  assert.equal(s.nodes["ocr-wilds-option"].hidden,false);
+  assert.equal(s.nodes["ocr-wilds-status"].hidden,true);
+  assert.equal(s.nodes["ocr-event-state"].hidden,true);
+  assert.equal(s.nodes["ocr-view-details"].open,false);
+  s.nodes["ocr-mode"].value="artian";
+  s.nodes["ocr-mode"].dispatchEvent({type:"change"});
+  assert.equal(s.nodes["ocr-wilds-option"].hidden,true);
+  s.nodes["ocr-mode"].value="gogma";
+  s.nodes["ocr-mode"].dispatchEvent({type:"change"});
+  assert.equal(s.nodes["ocr-wilds-option"].hidden,false);
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  assert.equal(s.nodes["ocr-wilds-status"].hidden,false);
+  s.nodes["ocr-event-mode"].checked=true;
+  s.nodes["ocr-event-mode"].dispatchEvent({type:"change"});
+  assert.equal(s.nodes["ocr-wilds-status"].hidden,true);
+  assert.equal(s.nodes["ocr-event-state"].hidden,false);
   s.ui.stop();
 });

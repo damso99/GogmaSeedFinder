@@ -21,11 +21,13 @@ const REGIONS_STORAGE_KEY = "gogma-ocr-regions-v1";
 const TEXT = {
   ko: {
     heading: "복원 결과 자동 입력",
-    description: "인식할 신규 옵션 5줄(스킬은 2줄)만 게임 화면에서 드래그해 선택하세요.",
+    description: "화면 공유 후 복원을 진행하면 결과를 자동으로 입력합니다.",
+    viewArea: "게임 화면·인식 영역 확인",
+    advancedSettings: "고급 설정 및 문제 해결",
     modeLabel: "인식 대상",
     zoomLabel: "인식 영역 확대",
     zoomFit: "화면에 맞춤",
-    wildsProfile: "실제 영상 기준 복원 감지 (16:9, 시험 기능)",
+    wildsProfile: "복원 결과 자동 감지 (16:9)",
     wildsIdle: "영상 기준 프리셋 꺼짐 · 기존 OCR 모드",
     wildsUnsupported: "이 프리셋은 게임 창이 화면 전체를 차지하는 16:9 캡처에서 사용하세요.",
     wildsUnknown: "????? 상태 감시 중 · 복원 결과가 표시되면 자동 캡처",
@@ -61,7 +63,7 @@ const TEXT = {
     retry: "다시 인식",
     pause: "인식 일시정지",
     resume: "인식 재개",
-    applyOnce: "인식 결과 한 번 입력",
+    applyOnce: "결과 직접 입력",
     selectArea: "미리보기에서 새 결과 텍스트만 드래그해 인식 영역을 지정하세요.",
     recognized: "최근 인식 결과",
     hint: "옵션만 포함하도록 인식 영역을 좁게 선택하세요. 선명하게 보정 모드는 글자를 최대 3배 확대하고 대비·윤곽을 조절합니다. 동일 화면은 반복 입력하지 않으며, 외부 서버로 화면을 전송하지 않습니다.",
@@ -80,11 +82,13 @@ const TEXT = {
   },
   en: {
     heading: "Auto-fill from game screen",
-    description: "Drag a region containing only the five new bonus lines (two for skills).",
+    description: "Share the game screen and roll to automatically record recognized results.",
+    viewArea: "Game preview & recognition area",
+    advancedSettings: "Advanced settings & troubleshooting",
     modeLabel: "Recognition target",
     zoomLabel: "Preview zoom",
     zoomFit: "Fit width",
-    wildsProfile: "Recorded Wilds reroll detection (16:9, experimental)",
+    wildsProfile: "Detect game rerolls automatically (16:9)",
     wildsIdle: "Recorded game profile off",
     wildsUnsupported: "Use a 16:9 capture with the game filling the window.",
     wildsUnknown: "Watching ????? placeholders for the next roll",
@@ -120,7 +124,7 @@ const TEXT = {
     retry: "Read again",
     pause: "Pause recognition",
     resume: "Resume recognition",
-    applyOnce: "Add recognized result once",
+    applyOnce: "Add result manually",
     selectArea: "Drag over the NEW result text in the game preview.",
     recognized: "Latest OCR",
     hint: "On comparison screens, select only the new results, not the old ones. Five bonuses (or two skills) must be recognized. Frames stay in your browser; OCR code and language data are downloaded on first use.",
@@ -139,11 +143,13 @@ const TEXT = {
   },
   ja: {
     heading: "画面から結果を自動入力",
-    description: "新しい結果の5項目（スキルは2項目）だけをドラッグして選択してください。",
+    description: "ゲーム画面を共有して復元すると結果を自動入力します。",
+    viewArea: "ゲーム画面と認識範囲を確認",
+    advancedSettings: "詳細設定・トラブル対応",
     modeLabel: "認識対象",
     zoomLabel: "プレビュー拡大",
     zoomFit: "幅に合わせる",
-    wildsProfile: "実映像に基づく結果検出（16:9、試験）",
+    wildsProfile: "復元結果を自動検出（16:9）",
     wildsIdle: "映像プリセット無効",
     wildsUnsupported: "ゲーム全画面の16:9映像を共有してください。",
     wildsUnknown: "????? 表示を監視中",
@@ -179,7 +185,7 @@ const TEXT = {
     retry: "もう一度認識",
     pause: "認識を一時停止",
     resume: "認識を再開",
-    applyOnce: "認識結果を1回入力",
+    applyOnce: "結果を手動入力",
     selectArea: "プレビューで新しい結果の文字部分だけをドラッグしてください。",
     recognized: "直近の認識結果",
     hint: "比較画面では新しい結果だけを選んでください。5項目（スキルは2項目）がそろうと入力できます。画像はブラウザ内のみで処理し、初回は韓国語OCRモデルをダウンロードします。",
@@ -198,11 +204,13 @@ const TEXT = {
   },
   "zh-Hant": {
     heading: "遊戲畫面自動填入",
-    description: "拖曳並選取只有五項新加成（技能為兩項）的區域。",
+    description: "分享遊戲畫面並進行還原後，自動輸入辨識結果。",
+    viewArea: "遊戲畫面與辨識區域",
+    advancedSettings: "進階設定與疑難排解",
     modeLabel: "辨識目標",
     zoomLabel: "預覽放大",
     zoomFit: "符合寬度",
-    wildsProfile: "實際影片還原偵測（16:9，實驗）",
+    wildsProfile: "自動偵測還原結果（16:9）",
     wildsIdle: "錄影預設關閉",
     wildsUnsupported: "請使用遊戲填滿畫面的 16:9 影像。",
     wildsUnknown: "正在監看 ????? 狀態",
@@ -238,7 +246,7 @@ const TEXT = {
     retry: "重新辨識",
     pause: "暫停辨識",
     resume: "繼續辨識",
-    applyOnce: "輸入辨識結果一次",
+    applyOnce: "手動輸入結果",
     selectArea: "請在預覽中拖曳並選擇新結果文字區域。",
     recognized: "最近辨識結果",
     hint: "比較畫面請只選取新結果，不要包含舊結果。必須辨識到五項加成（或兩項技能）才會填入。畫面僅於瀏覽器內處理，首次需要下載OCR程式及韓文模型。",
@@ -303,6 +311,8 @@ export function initializeOcrUi(doc = document) {
   const precisionCheck = $("#ocr-precision");
   const eventModeCheck = $("#ocr-event-mode");
   const wildsCheck = $("#ocr-wilds-profile");
+  const wildsOption = $("#ocr-wilds-option");
+  const viewDetails = $("#ocr-view-details");
   const wildsStatus = $("#ocr-wilds-status");
   const wildsProgress = $("#ocr-wilds-progress");
   const wildsHistory = $("#ocr-wilds-history");
@@ -383,6 +393,12 @@ export function initializeOcrUi(doc = document) {
     if (status.dataset.state !== state) status.dataset.state = state;
   }
 
+  function syncPrimaryControls() {
+    if (wildsOption) wildsOption.hidden = modeSelect.value !== "gogma";
+    if (wildsStatus) wildsStatus.hidden = !wildsCheck?.checked;
+    if (eventStatus) eventStatus.hidden = !eventModeCheck?.checked;
+  }
+
   function resetEventTracking() {
     rollEvents.reset();
     consensus.reset(modeSelect.value);
@@ -412,12 +428,17 @@ export function initializeOcrUi(doc = document) {
   function updateWildsProgress() {
     const enabled = Boolean(wildsCheck?.checked);
     const data = wildsTasks.counts();
+    if (wildsStatus) wildsStatus.hidden = !enabled;
     if (wildsProgress) {
       wildsProgress.hidden = !enabled;
       const labels = translations.wildsCounts;
       const values = [wildsTracker.getState().eventId, data.pending,
         data.processing, data.completed, data.review, data.dropped];
-      const message = labels.map((label, index) => label + " " + values[index]).join(" · ");
+      const visible = [0, 3, 4];
+      if (data.pending) visible.splice(1, 0, 1);
+      if (data.processing) visible.splice(2, 0, 2);
+      if (data.dropped) visible.push(5);
+      const message = visible.map(index => labels[index] + " " + values[index]).join(" · ");
       if (wildsProgress.textContent !== message) wildsProgress.textContent = message;
     }
     if (wildsHistory) {
@@ -1137,6 +1158,8 @@ export function initializeOcrUi(doc = document) {
     resetWildsTracking();
     if (wildsCheck?.checked) setWildsProfileRegion();
     resetReading({ keepRecognized: true });
+    if (viewDetails) viewDetails.open = !validRegion(region);
+    syncPrimaryControls();
     previewTimer = window.setInterval(drawPreview, PREVIEW_INTERVAL_MS);
     scanTimer = window.setInterval(() => { void scan(); }, OCR_INTERVAL_MS);
     drawPreview();
@@ -1170,6 +1193,8 @@ export function initializeOcrUi(doc = document) {
     sequencers[modeSelect.value].clearPending();
     resetEventTracking();
     resetReading();
+    syncPrimaryControls();
+    if (viewDetails && !validRegion(region)) viewDetails.open = true;
   });
   wildsCheck?.addEventListener("change", () => {
     session++;
@@ -1182,6 +1207,7 @@ export function initializeOcrUi(doc = document) {
     resetWildsTracking();
     sequencers[modeSelect.value].clearPending();
     resetReading({ keepRecognized: true });
+    syncPrimaryControls();
   });
   eventModeCheck?.addEventListener("change", () => {
     session++;
@@ -1192,6 +1218,7 @@ export function initializeOcrUi(doc = document) {
     sequencers[modeSelect.value].clearPending();
     resetEventTracking();
     resetReading({ keepRecognized: true });
+    syncPrimaryControls();
   });
   precisionCheck?.addEventListener("change", () => {
     session++;
@@ -1260,6 +1287,7 @@ export function initializeOcrUi(doc = document) {
     if (video) start();
   });
   doc.addEventListener("gogma:screen-share-stopped", stop);
+  syncPrimaryControls();
   return { scan, stop, preview: drawPreview };
 }
 
