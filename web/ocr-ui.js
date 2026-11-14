@@ -9,7 +9,8 @@ import { recognizeResultRows } from "./ocr-lines.js";
 import { loadOcrSnapshots, lastSavedOcrSignature } from "./ocr-observation-store.js";
 import { createRollEventDetector } from "./ocr-roll-event.js";
 import { createOcrConsensus } from "./ocr-consensus.js";
-import { WILDS_GOGMA_ROI, WILDS_GOGMA_SIGNAL, supportsWildsGogmaProfile, measureWildsResultSignal, createWildsResultTracker, wildsFrameQuality, isolateWildsGreenText } from "./ocr-wilds-profile.js";
+import { createWildsOcrQueue } from "./ocr-wilds-queue.js";
+import { WILDS_GOGMA_ROI, WILDS_GOGMA_SIGNAL, supportsWildsGogmaProfile, measureWildsResultSignal, createWildsResultTracker, wildsFrameQuality, isolateWildsGreenText, isolateWildsColoredText } from "./ocr-wilds-profile.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1200;
@@ -32,6 +33,12 @@ const TEXT = {
     wildsReading: "복원 화면 저장 완료 · 결과 분석 중",
     wildsComplete: "복원 결과 자동 입력 완료 · 다음 결과 대기",
     wildsFailed: "저장된 복원 화면에서 옵션 5개를 확정하지 못했습니다. 영역과 보정 이미지를 확인하세요.",
+    wildsPaused: "일시정지 · 저장된 화면은 유지되며 재개하면 분석합니다.",
+    wildsQueued: "복원 이미지가 대기열에 저장되었습니다. 인식 순서를 기다리는 중",
+    wildsReview: "인식 확인 필요 · 해당 회차의 저장 화면으로 다시 인식할 수 있습니다.",
+    wildsOverflow: "OCR 대기열 한도 초과 · 일부 결과를 저장하지 못했습니다. 일시정지를 해제하세요.",
+    wildsCounts: ["감지","대기","분석","완료","확인 필요","초과"],
+    wildsStates: { pending:"대기", processing:"분석 중", done:"입력 완료", review:"확인 필요" },
     eventMode: "복원 이벤트 추적 + 다중 프레임 인식 (시험 기능)",
     eventIdle: "이벤트 추적 비활성 · 기존 OCR 방식 사용",
     eventInitial: "이벤트 감시: 첫 결과 화면이 안정화되기를 기다리는 중",
@@ -85,6 +92,12 @@ const TEXT = {
     wildsReading: "Reading saved game frames",
     wildsComplete: "Restoration recorded · awaiting next result",
     wildsFailed: "Could not verify all five slots; inspect the capture.",
+    wildsPaused: "Paused · captured frames are retained until resumed.",
+    wildsQueued: "Result images saved; awaiting OCR.",
+    wildsReview: "Needs review · the saved result can be retried.",
+    wildsOverflow: "OCR queue full · some results could not be saved.",
+    wildsCounts: ["Detected","Queued","Reading","Saved","Review","Overflow"],
+    wildsStates: { pending:"Queued", processing:"Reading", done:"Saved", review:"Review" },
     eventMode: "Track reroll event + multi-frame OCR (experimental)",
     eventIdle: "Event tracking off · original OCR mode",
     eventInitial: "Waiting for the first stable result",
@@ -138,6 +151,12 @@ const TEXT = {
     wildsReading: "保存した画像を認識中",
     wildsComplete: "復元結果を記録済み",
     wildsFailed: "5項目を確認できませんでした。",
+    wildsPaused: "一時停止中 · 保存画像は再開まで保持します。",
+    wildsQueued: "結果の画像を保存しました。OCR待機中です。",
+    wildsReview: "確認が必要です。保存画像から再解析できます。",
+    wildsOverflow: "OCRキューの上限に達しました。",
+    wildsCounts: ["検出","待機","解析","完了","確認","超過"],
+    wildsStates: { pending:"待機", processing:"解析中", done:"入力済", review:"確認" },
     eventMode: "再抽選イベント追跡 + 複数フレーム認識（試験）",
     eventIdle: "イベント追跡オフ",
     eventInitial: "最初の安定した画面を待機中",
@@ -191,6 +210,12 @@ const TEXT = {
     wildsReading: "辨識已儲存的畫面",
     wildsComplete: "結果已記錄",
     wildsFailed: "無法確認全部五個選項。",
+    wildsPaused: "暫停 · 已擷取畫面保留至恢復。",
+    wildsQueued: "已儲存畫面，等待 OCR。",
+    wildsReview: "需要確認，可重新辨識已儲存結果。",
+    wildsOverflow: "OCR 佇列已滿，部分結果未儲存。",
+    wildsCounts: ["偵測","等待","分析","完成","確認","溢出"],
+    wildsStates: { pending:"等待", processing:"分析中", done:"完成", review:"確認" },
     eventMode: "追蹤重抽事件 + 多影格辨識（實驗）",
     eventIdle: "事件追蹤關閉",
     eventInitial: "等待第一個穩定畫面",
@@ -279,6 +304,8 @@ export function initializeOcrUi(doc = document) {
   const eventModeCheck = $("#ocr-event-mode");
   const wildsCheck = $("#ocr-wilds-profile");
   const wildsStatus = $("#ocr-wilds-status");
+  const wildsProgress = $("#ocr-wilds-progress");
+  const wildsHistory = $("#ocr-wilds-history");
   const eventStatus = $("#ocr-event-state");
   const autoCheck = $("#ocr-auto");
   const resetButton = $("#ocr-reset-area");
@@ -308,6 +335,7 @@ export function initializeOcrUi(doc = document) {
   const rollEvents = createRollEventDetector();
   const consensus = createOcrConsensus({ windowSize: 5, minVotes: 2 });
   const wildsTracker = createWildsResultTracker();
+  const wildsTasks = createWildsOcrQueue({ maxActive: 8, maxHistory: 20 });
   const wildsProbe = doc.createElement("canvas");
   wildsProbe.width = 140;
   wildsProbe.height = 150;
@@ -341,10 +369,8 @@ export function initializeOcrUi(doc = document) {
   let currentFrame = null;
   let activeEventId = 0;
   let committedEventId = 0;
-  let wildsQueue = [];
   let wildsCaptures = [];
   let wildsEnqueuedId = 0;
-  let wildsCompletedId = 0;
   let wildsAppliedIds = new Set();
   let wildsLastBatch = null;
   let region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
@@ -384,12 +410,12 @@ export function initializeOcrUi(doc = document) {
 
   function resetWildsTracking() {
     wildsTracker.reset();
-    wildsQueue = [];
+    wildsTasks.clear();
     wildsCaptures = [];
     wildsEnqueuedId = 0;
-    wildsCompletedId = 0;
     wildsAppliedIds = new Set();
     wildsLastBatch = null;
+    updateWildsProgress();
     if (wildsStatus) wildsStatus.textContent = wildsCheck?.checked
       ? translations.wildsUnknown : translations.wildsIdle;
   }
@@ -420,10 +446,11 @@ export function initializeOcrUi(doc = document) {
     const original = cloneOcrCanvas(captureRegion("original"));
     const enhanced = cloneOcrCanvas(captureRegion("enhanced"));
     const green = cloneOcrCanvas(captureRegion("wilds-green"));
-    if (!enhanced || !original || !green) return null;
+    const colored = cloneOcrCanvas(captureRegion("wilds-colors"));
+    if (!enhanced || !original || !green || !colored) return null;
     const pixels = original.getContext("2d", { willReadFrequently: true })
       .getImageData(0, 0, original.width, original.height);
-    return { green, enhanced, original, quality: wildsFrameQuality(pixels) };
+    return { colored, green, enhanced, original, quality: wildsFrameQuality(pixels) };
   }
 
   function monitorWildsPreview() {
@@ -744,7 +771,11 @@ export function initializeOcrUi(doc = document) {
     workContext.drawImage(video, left, top, width, height,
       padding, padding, renderedWidth, renderedHeight);
 
-    if (preprocess === "wilds-green") {
+    if (preprocess === "wilds-colors") {
+      const pixels = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
+      isolateWildsColoredText(pixels);
+      workContext.putImageData(pixels, padding, padding);
+    } else if (preprocess === "wilds-green") {
       const pixels = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
       isolateWildsGreenText(pixels);
       workContext.putImageData(pixels, padding, padding);
