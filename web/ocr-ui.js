@@ -9,11 +9,7 @@ import { recognizeResultRows } from "./ocr-lines.js";
 import { loadOcrSnapshots, lastSavedOcrSignature } from "./ocr-observation-store.js";
 import { createRollEventDetector } from "./ocr-roll-event.js";
 import { createOcrConsensus } from "./ocr-consensus.js";
-import {
-  WILDS_GOGMA_ROI, WILDS_GOGMA_SIGNAL,
-  supportsWildsGogmaProfile, measureWildsResultSignal,
-  createWildsResultTracker, wildsFrameQuality,
-} from "./ocr-wilds-profile.js";
+import { WILDS_GOGMA_ROI, WILDS_GOGMA_SIGNAL, supportsWildsGogmaProfile, measureWildsResultSignal, createWildsResultTracker, wildsFrameQuality } from "./ocr-wilds-profile.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1200;
