@@ -345,6 +345,7 @@ export function initializeOcrUi(doc = document) {
   let wildsCaptures = [];
   let wildsEnqueuedId = 0;
   let wildsCompletedId = 0;
+  let wildsAppliedIds = new Set();
   let wildsLastBatch = null;
   let region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
   let pointerOrigin = null;
@@ -387,6 +388,7 @@ export function initializeOcrUi(doc = document) {
     wildsCaptures = [];
     wildsEnqueuedId = 0;
     wildsCompletedId = 0;
+    wildsAppliedIds = new Set();
     wildsLastBatch = null;
     if (wildsStatus) wildsStatus.textContent = wildsCheck?.checked
       ? translations.wildsUnknown : translations.wildsIdle;
@@ -415,8 +417,8 @@ export function initializeOcrUi(doc = document) {
   }
 
   function captureWildsSnapshot() {
-    const enhanced = cloneOcrCanvas(captureRegion("enhanced"));
     const original = cloneOcrCanvas(captureRegion("original"));
+    const enhanced = cloneOcrCanvas(captureRegion("enhanced"));
     if (!enhanced || !original) return null;
     const pixels = original.getContext("2d", { willReadFrequently: true })
       .getImageData(0, 0, original.width, original.height);
@@ -516,11 +518,14 @@ export function initializeOcrUi(doc = document) {
         // Genuine later events can have the same options and still count.
         const repeatedOnReconnect = batch.id === 1
           && sequencers.gogma.alreadyApplied(result.signature);
-        if (autoCheck.checked && confidence >= MIN_AUTO_CONFIDENCE && !repeatedOnReconnect) {
+        if (autoCheck.checked && confidence >= MIN_AUTO_CONFIDENCE
+          && !repeatedOnReconnect && !wildsAppliedIds.has(batch.id)) {
           currentFrame = snapshotRegion();
-          applyResult(result);
-          if (wildsStatus) wildsStatus.textContent = translations.wildsComplete;
-        } else if (repeatedOnReconnect) {
+          const applied = applyResult(result);
+          if (applied) wildsAppliedIds.add(batch.id);
+          if (wildsStatus) wildsStatus.textContent = applied
+            ? translations.wildsComplete : translations.wildsFailed;
+        } else if (repeatedOnReconnect || wildsAppliedIds.has(batch.id)) {
           setStatus(translations.duplicate);
           if (wildsStatus) wildsStatus.textContent = translations.wildsComplete;
         } else {
@@ -822,6 +827,7 @@ export function initializeOcrUi(doc = document) {
     }
     // Manual confirmation can record intentionally repeated, identical rolls.
     if (manual && reply.success) applyButton.disabled = false;
+    return Boolean(reply?.success);
   }
 
   async function scan() {
@@ -1087,7 +1093,8 @@ export function initializeOcrUi(doc = document) {
   });
   retryButton?.addEventListener("click", () => {
     session++;
-    if (wildsCheck?.checked && wildsLastBatch) {
+    if (wildsCheck?.checked && wildsLastBatch
+      && !wildsAppliedIds.has(wildsLastBatch.id)) {
       wildsQueue.push(wildsLastBatch);
       wildsCompletedId = Math.min(wildsCompletedId, wildsLastBatch.id - 1);
     }
