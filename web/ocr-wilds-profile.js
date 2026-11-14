@@ -38,6 +38,31 @@ export function measureWildsResultSignal(imageData) {
   return green / count;
 }
 
+// Dedicated preprocessing for the filmed right-side bonus panel: remove
+// blue row patterns and yellow/green translucent game scenery, keeping only
+// the saturated green result labels and numeric values. Highlighted white
+// text is handled by the original/enhanced image fallback.
+export function isolateWildsGreenText(imageData) {
+  const pixels = imageData?.data;
+  if (!pixels?.length) return imageData;
+  for(let p = 0; p < pixels.length; p += 4) {
+    const r = pixels[p] / 255, g = pixels[p+1] / 255, b = pixels[p+2] / 255;
+    const high = Math.max(r,g,b), low = Math.min(r,g,b), diff = high-low;
+    let greenText = false;
+    if(high >= 0.20 && diff > 0 && diff/high >= 0.20) {
+      let hue;
+      if(high === r) hue = 60 * (((g-b)/diff + 6) % 6);
+      else if(high === g) hue = 60 * ((b-r)/diff + 2);
+      else hue = 60 * ((r-g)/diff + 4);
+      greenText = hue >= 64 && hue <= 196;
+    }
+    const output = greenText ? 0 : 255;
+    pixels[p] = pixels[p+1] = pixels[p+2] = output;
+    pixels[p+3] = 255;
+  }
+  return imageData;
+}
+
 // No OCR is run on transient frames. The UI copies a high-resolution bonus
 // image immediately, then can OCR it later even after the result disappears.
 export function createWildsResultTracker({
