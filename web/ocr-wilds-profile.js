@@ -63,6 +63,29 @@ export function isolateWildsGreenText(imageData) {
   return imageData;
 }
 
+// Mix green and red reinforcement labels into the SAME black-on-white text
+// image. The real game video shows both colors in one five-row result. The
+// green-only pass silently erased some red bonus rows.
+export function isolateWildsColoredText(imageData) {
+  const pixels = imageData?.data;
+  if (!pixels?.length) return imageData;
+  for (let p = 0; p < pixels.length; p += 4) {
+    const r = pixels[p] / 255, g = pixels[p+1] / 255, b = pixels[p+2] / 255;
+    const high = Math.max(r,g,b), low = Math.min(r,g,b), diff = high-low;
+    let ink = false;
+    if (high >= 0.20 && diff > 0 && diff/high >= 0.20) {
+      let hue;
+      if (high === r) hue = 60 * (((g-b)/diff + 6) % 6);
+      else if (high === g) hue = 60 * ((b-r)/diff + 2);
+      else hue = 60 * ((r-g)/diff + 4);
+      ink = (hue >= 64 && hue <= 196) || hue <= 18 || hue >= 340;
+    }
+    pixels[p] = pixels[p+1] = pixels[p+2] = ink ? 0 : 255;
+    pixels[p+3] = 255;
+  }
+  return imageData;
+}
+
 // No OCR is run on transient frames. The UI copies a high-resolution bonus
 // image immediately, then can OCR it later even after the result disappears.
 export function createWildsResultTracker({

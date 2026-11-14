@@ -9,7 +9,8 @@ import { recognizeResultRows } from "./ocr-lines.js";
 import { loadOcrSnapshots, lastSavedOcrSignature } from "./ocr-observation-store.js";
 import { createRollEventDetector } from "./ocr-roll-event.js";
 import { createOcrConsensus } from "./ocr-consensus.js";
-import { WILDS_GOGMA_ROI, WILDS_GOGMA_SIGNAL, supportsWildsGogmaProfile, measureWildsResultSignal, createWildsResultTracker, wildsFrameQuality, isolateWildsGreenText } from "./ocr-wilds-profile.js";
+import { createWildsOcrQueue } from "./ocr-wilds-queue.js";
+import { WILDS_GOGMA_ROI, WILDS_GOGMA_SIGNAL, supportsWildsGogmaProfile, measureWildsResultSignal, createWildsResultTracker, wildsFrameQuality, isolateWildsGreenText, isolateWildsColoredText } from "./ocr-wilds-profile.js";
 
 const OCR_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 const OCR_INTERVAL_MS = 1200;
@@ -32,6 +33,12 @@ const TEXT = {
     wildsReading: "복원 화면 저장 완료 · 결과 분석 중",
     wildsComplete: "복원 결과 자동 입력 완료 · 다음 결과 대기",
     wildsFailed: "저장된 복원 화면에서 옵션 5개를 확정하지 못했습니다. 영역과 보정 이미지를 확인하세요.",
+    wildsPaused: "일시정지 · 저장된 화면은 유지되며 재개하면 분석합니다.",
+    wildsQueued: "복원 이미지가 대기열에 저장되었습니다. 인식 순서를 기다리는 중",
+    wildsReview: "인식 확인 필요 · 해당 회차의 저장 화면으로 다시 인식할 수 있습니다.",
+    wildsOverflow: "OCR 대기열 한도 초과 · 일부 결과를 저장하지 못했습니다. 일시정지를 해제하세요.",
+    wildsCounts: ["감지","대기","분석","완료","확인 필요","초과"],
+    wildsStates: { pending:"대기", processing:"분석 중", done:"입력 완료", review:"확인 필요" },
     eventMode: "복원 이벤트 추적 + 다중 프레임 인식 (시험 기능)",
     eventIdle: "이벤트 추적 비활성 · 기존 OCR 방식 사용",
     eventInitial: "이벤트 감시: 첫 결과 화면이 안정화되기를 기다리는 중",
@@ -85,6 +92,12 @@ const TEXT = {
     wildsReading: "Reading saved game frames",
     wildsComplete: "Restoration recorded · awaiting next result",
     wildsFailed: "Could not verify all five slots; inspect the capture.",
+    wildsPaused: "Paused · captured frames are retained until resumed.",
+    wildsQueued: "Result images saved; awaiting OCR.",
+    wildsReview: "Needs review · the saved result can be retried.",
+    wildsOverflow: "OCR queue full · some results could not be saved.",
+    wildsCounts: ["Detected","Queued","Reading","Saved","Review","Overflow"],
+    wildsStates: { pending:"Queued", processing:"Reading", done:"Saved", review:"Review" },
     eventMode: "Track reroll event + multi-frame OCR (experimental)",
     eventIdle: "Event tracking off · original OCR mode",
     eventInitial: "Waiting for the first stable result",
@@ -138,6 +151,12 @@ const TEXT = {
     wildsReading: "保存した画像を認識中",
     wildsComplete: "復元結果を記録済み",
     wildsFailed: "5項目を確認できませんでした。",
+    wildsPaused: "一時停止中 · 保存画像は再開まで保持します。",
+    wildsQueued: "結果の画像を保存しました。OCR待機中です。",
+    wildsReview: "確認が必要です。保存画像から再解析できます。",
+    wildsOverflow: "OCRキューの上限に達しました。",
+    wildsCounts: ["検出","待機","解析","完了","確認","超過"],
+    wildsStates: { pending:"待機", processing:"解析中", done:"入力済", review:"確認" },
     eventMode: "再抽選イベント追跡 + 複数フレーム認識（試験）",
     eventIdle: "イベント追跡オフ",
     eventInitial: "最初の安定した画面を待機中",
@@ -191,6 +210,12 @@ const TEXT = {
     wildsReading: "辨識已儲存的畫面",
     wildsComplete: "結果已記錄",
     wildsFailed: "無法確認全部五個選項。",
+    wildsPaused: "暫停 · 已擷取畫面保留至恢復。",
+    wildsQueued: "已儲存畫面，等待 OCR。",
+    wildsReview: "需要確認，可重新辨識已儲存結果。",
+    wildsOverflow: "OCR 佇列已滿，部分結果未儲存。",
+    wildsCounts: ["偵測","等待","分析","完成","確認","溢出"],
+    wildsStates: { pending:"等待", processing:"分析中", done:"完成", review:"確認" },
     eventMode: "追蹤重抽事件 + 多影格辨識（實驗）",
     eventIdle: "事件追蹤關閉",
     eventInitial: "等待第一個穩定畫面",
@@ -279,6 +304,8 @@ export function initializeOcrUi(doc = document) {
   const eventModeCheck = $("#ocr-event-mode");
   const wildsCheck = $("#ocr-wilds-profile");
   const wildsStatus = $("#ocr-wilds-status");
+  const wildsProgress = $("#ocr-wilds-progress");
+  const wildsHistory = $("#ocr-wilds-history");
   const eventStatus = $("#ocr-event-state");
   const autoCheck = $("#ocr-auto");
   const resetButton = $("#ocr-reset-area");
@@ -308,6 +335,7 @@ export function initializeOcrUi(doc = document) {
   const rollEvents = createRollEventDetector();
   const consensus = createOcrConsensus({ windowSize: 5, minVotes: 2 });
   const wildsTracker = createWildsResultTracker();
+  const wildsTasks = createWildsOcrQueue({ maxActive: 8, maxHistory: 20 });
   const wildsProbe = doc.createElement("canvas");
   wildsProbe.width = 140;
   wildsProbe.height = 150;
@@ -341,12 +369,11 @@ export function initializeOcrUi(doc = document) {
   let currentFrame = null;
   let activeEventId = 0;
   let committedEventId = 0;
-  let wildsQueue = [];
   let wildsCaptures = [];
   let wildsEnqueuedId = 0;
-  let wildsCompletedId = 0;
   let wildsAppliedIds = new Set();
   let wildsLastBatch = null;
+  let wildsLastRecognizedId = 0;
   let region = validRegion(regions[modeSelect.value]) ? regions[modeSelect.value] : null;
   let pointerOrigin = null;
   let pointerRegion = null;
@@ -382,14 +409,49 @@ export function initializeOcrUi(doc = document) {
     return state;
   }
 
+  function updateWildsProgress() {
+    const enabled = Boolean(wildsCheck?.checked);
+    const data = wildsTasks.counts();
+    if (wildsProgress) {
+      wildsProgress.hidden = !enabled;
+      const labels = translations.wildsCounts;
+      const values = [wildsTracker.getState().eventId, data.pending,
+        data.processing, data.completed, data.review, data.dropped];
+      const message = labels.map((label, index) => label + " " + values[index]).join(" · ");
+      if (wildsProgress.textContent !== message) wildsProgress.textContent = message;
+    }
+    if (wildsHistory) {
+      const entries = wildsTasks.history().slice(-8);
+      wildsHistory.hidden = !enabled || entries.length === 0;
+      const message = entries.map(item =>
+        "#" + item.id + " " + (translations.wildsStates[item.status] ?? item.status)
+        + (item.status === "review" ? " (" + item.recognized + "/5)" : "")
+      ).join(" · ");
+      if (wildsHistory.textContent !== message) wildsHistory.textContent = message;
+    }
+    if (!wildsStatus || !enabled) return;
+    let next;
+    if (data.dropped) next = translations.wildsOverflow;
+    else if (paused) next = translations.wildsPaused;
+    else if (data.processing) next = translations.wildsReading;
+    else if (data.pending) next = translations.wildsQueued;
+    else if (data.review) next = translations.wildsReview;
+    else if (wildsTracker.getState().phase === "revealed"
+      && wildsCaptures.length) next = translations.wildsRevealed;
+    else if (data.completed) next = translations.wildsComplete;
+    else next = translations.wildsUnknown;
+    if (wildsStatus.textContent !== next) wildsStatus.textContent = next;
+  }
+
   function resetWildsTracking() {
     wildsTracker.reset();
-    wildsQueue = [];
+    wildsTasks.clear();
     wildsCaptures = [];
     wildsEnqueuedId = 0;
-    wildsCompletedId = 0;
     wildsAppliedIds = new Set();
     wildsLastBatch = null;
+    wildsLastRecognizedId = 0;
+    updateWildsProgress();
     if (wildsStatus) wildsStatus.textContent = wildsCheck?.checked
       ? translations.wildsUnknown : translations.wildsIdle;
   }
@@ -420,10 +482,11 @@ export function initializeOcrUi(doc = document) {
     const original = cloneOcrCanvas(captureRegion("original"));
     const enhanced = cloneOcrCanvas(captureRegion("enhanced"));
     const green = cloneOcrCanvas(captureRegion("wilds-green"));
-    if (!enhanced || !original || !green) return null;
+    const colored = cloneOcrCanvas(captureRegion("wilds-colors"));
+    if (!enhanced || !original || !green || !colored) return null;
     const pixels = original.getContext("2d", { willReadFrequently: true })
       .getImageData(0, 0, original.width, original.height);
-    return { green, enhanced, original, quality: wildsFrameQuality(pixels) };
+    return { colored, green, enhanced, original, quality: wildsFrameQuality(pixels) };
   }
 
   function monitorWildsPreview() {
@@ -446,7 +509,7 @@ export function initializeOcrUi(doc = document) {
     const state = wildsTracker.observe(score);
     if (state.newEvent) {
       wildsCaptures = [];
-      if (wildsStatus) wildsStatus.textContent = translations.wildsRevealed;
+      updateWildsProgress();
     }
     if (state.shouldCapture && state.eventId > wildsEnqueuedId) {
       const screenshot = captureWildsSnapshot();
@@ -456,20 +519,20 @@ export function initializeOcrUi(doc = document) {
       && state.eventId > wildsEnqueuedId) {
       // The OCR worker receives immutable snapshots, not the live video.
       const batch = { id: state.eventId, snapshots: wildsCaptures };
-      wildsQueue.push(batch);
+      const accepted = wildsTasks.enqueue(batch);
       wildsEnqueuedId = state.eventId;
-      wildsLastBatch = batch;
+      if (accepted) wildsLastBatch = batch;
       wildsCaptures = [];
-      if (wildsStatus) wildsStatus.textContent = translations.wildsReading;
+      updateWildsProgress();
     }
-    if (state.phase === "hidden" && wildsQueue.length === 0 && wildsCompletedId === 0
-      && wildsStatus) wildsStatus.textContent = translations.wildsUnknown;
+    updateWildsProgress();
   }
 
   async function scanWildsQueue() {
-    if (running || paused || !video || !wildsQueue.length) return;
-    const batch = wildsQueue.shift();
-    if (!batch || batch.id <= wildsCompletedId) return;
+    if (running || paused || !video) return;
+    const batch = wildsTasks.begin();
+    if (!batch) return;
+    updateWildsProgress();
     const epoch = session;
     running = true;
     try {
@@ -485,11 +548,24 @@ export function initializeOcrUi(doc = document) {
       let snapshotIndex = 0;
       for (const screenshot of ordered) {
         snapshotIndex++;
-        const first = await worker.recognize(screenshot.green);
+        const first = await worker.recognize(screenshot.colored);
         if (epoch !== session || !video) return;
         let chosen = first;
         let result = parseOcrResult("gogma", first?.data?.text ?? "");
         let confidence = Number(first?.data?.confidence) || 0;
+        if (!result.complete) {
+          // Green-only mode can recover noisy green rows, but may omit red rows.
+          // It is a fallback rather than the first OCR pass.
+          const greenRead = await worker.recognize(screenshot.green);
+          if (epoch !== session || !video) return;
+          const greenResult = parseOcrResult("gogma", greenRead?.data?.text ?? "");
+          const alternative = { result: greenResult, confidence: Number(greenRead?.data?.confidence) || 0 };
+          if (bestOcrCandidate({ result, confidence }, alternative) === alternative) {
+            result = greenResult;
+            confidence = alternative.confidence;
+            chosen = greenRead;
+          }
+        }
         if (!result.complete) {
           const fallback = await worker.recognize(screenshot.enhanced);
           if (epoch !== session || !video) return;
@@ -533,53 +609,68 @@ export function initializeOcrUi(doc = document) {
         if (final?.result?.complete && final.confidence >= MIN_AUTO_CONFIDENCE) break;
       }
       if (epoch !== session || !video) return;
-      wildsCompletedId = batch.id;
       if (final?.result?.complete) {
         const result = final.result;
         const confidence = final.confidence;
         lastResult = result;
         lastConfidence = confidence;
         displayedConfidence = confidence;
+        wildsLastRecognizedId = batch.id;
         applyButton.disabled = false;
         const text = strongest?.rawText?.trim() || result.ids.join(" / ");
         output.textContent = text + "\n\n[5/5] " + result.ids.join(" / ");
-        // Never re-add the previous confirmed roll merely from reconnecting.
-        // Genuine later events can have the same options and still count.
         const repeatedOnReconnect = batch.id === 1
           && sequencers.gogma.alreadyApplied(result.signature);
-        if (autoCheck.checked && confidence >= MIN_AUTO_CONFIDENCE
-          && !repeatedOnReconnect && !wildsAppliedIds.has(batch.id)) {
+        if (repeatedOnReconnect || wildsAppliedIds.has(batch.id)) {
+          wildsTasks.finish(batch.id, "done", { recognized: 5 });
+          setStatus(translations.duplicate);
+        } else if (autoCheck.checked && confidence >= MIN_AUTO_CONFIDENCE) {
           currentFrame = snapshotRegion();
           const applied = applyResult(result);
-          if (applied) wildsAppliedIds.add(batch.id);
-          if (wildsStatus) wildsStatus.textContent = applied
-            ? translations.wildsComplete : translations.wildsFailed;
-        } else if (repeatedOnReconnect || wildsAppliedIds.has(batch.id)) {
-          setStatus(translations.duplicate);
-          if (wildsStatus) wildsStatus.textContent = translations.wildsComplete;
+          if (applied) {
+            wildsAppliedIds.add(batch.id);
+            wildsTasks.finish(batch.id, "done", { recognized: 5 });
+          } else {
+            wildsTasks.finish(batch.id, "review", { recognized: 5, message: translations.noApp });
+          }
         } else {
+          wildsTasks.finish(batch.id, "review", { recognized: 5,
+            message: confidence < MIN_AUTO_CONFIDENCE ? translations.lowConfidence : translations.ready });
           setStatus(confidence < MIN_AUTO_CONFIDENCE
             ? translations.lowConfidence + " (" + Math.round(confidence) + "%)"
             : translations.ready + result.ids.join(" / "));
         }
       } else {
+        const recognized = strongest?.result?.recognized ?? 0;
         if (strongest && (!lastResult?.complete || strongest.result.complete)) {
           lastResult = strongest.result;
           lastConfidence = strongest.confidence;
+          wildsLastRecognizedId = batch.id;
           output.textContent = (strongest.rawText.trim() || "—") +
-            "\n\n[" + strongest.result.recognized + "/5] " +
-            strongest.result.labels.join(" / ");
+            "\n\n[" + recognized + "/5] " + strongest.result.labels.join(" / ");
           applyButton.disabled = !strongest.result.complete;
         }
+        wildsTasks.finish(batch.id, "review", {
+          recognized, message: translations.wildsFailed,
+        });
         setStatus(translations.wildsFailed);
-        if (wildsStatus) wildsStatus.textContent = translations.wildsFailed;
       }
     } catch (error) {
-      if (epoch === session && !hasRecordedResult()) {
-        setStatus(translations.failure + " " + (error?.message ?? ""), "error");
+      if (epoch === session) {
+        wildsTasks.finish(batch.id, "review", {
+          recognized: 0,
+          message: translations.failure + " " + (error?.message ?? ""),
+        });
+        if (!hasRecordedResult()) {
+          setStatus(translations.failure + " " + (error?.message ?? ""), "error");
+        }
       }
     } finally {
+      // A pause, setting change, or screen-share change invalidates the OCR
+      // pass, but its frozen source images remain available for resume.
+      wildsTasks.rollback(batch);
       running = false;
+      updateWildsProgress();
     }
   }
 
@@ -744,7 +835,11 @@ export function initializeOcrUi(doc = document) {
     workContext.drawImage(video, left, top, width, height,
       padding, padding, renderedWidth, renderedHeight);
 
-    if (preprocess === "wilds-green") {
+    if (preprocess === "wilds-colors") {
+      const pixels = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
+      isolateWildsColoredText(pixels);
+      workContext.putImageData(pixels, padding, padding);
+    } else if (preprocess === "wilds-green") {
       const pixels = workContext.getImageData(padding, padding, renderedWidth, renderedHeight);
       isolateWildsGreenText(pixels);
       workContext.putImageData(pixels, padding, padding);
@@ -1126,10 +1221,12 @@ export function initializeOcrUi(doc = document) {
   });
   retryButton?.addEventListener("click", () => {
     session++;
-    if (wildsCheck?.checked && wildsLastBatch
-      && !wildsAppliedIds.has(wildsLastBatch.id)) {
-      wildsQueue.push(wildsLastBatch);
-      wildsCompletedId = Math.min(wildsCompletedId, wildsLastBatch.id - 1);
+    if (wildsCheck?.checked) {
+      // Retry the OLDEST unresolved result, not just the newest capture.
+      // Earlier failed rolls must stay recoverable after later rolls succeed.
+      const unresolved = wildsTasks.history().find(item => item.status === "review");
+      if (unresolved) wildsTasks.retry(unresolved.id);
+      updateWildsProgress();
     }
     sequencers[modeSelect.value].clearPending();
     resetReading({ keepRecognized: true });
@@ -1139,9 +1236,15 @@ export function initializeOcrUi(doc = document) {
     if (paused) session++;
     pauseButton.textContent = paused ? translations.resume : translations.pause;
     setStatus(paused ? translations.paused : region ? translations.reading : translations.selectArea);
+    updateWildsProgress();
   });
   applyButton.addEventListener("click", () => {
-    if (lastResult?.complete) applyResult(lastResult, true);
+    if (lastResult?.complete && applyResult(lastResult, true) && wildsCheck?.checked) {
+      if (wildsTasks.confirmReview(wildsLastRecognizedId)) {
+        wildsAppliedIds.add(wildsLastRecognizedId);
+        updateWildsProgress();
+      }
+    }
   });
   for (const selector of ["#weapon-type", "#attribute-force",
     "#artian-search-weapon-type", "#artian-search-attribute-force"]) {

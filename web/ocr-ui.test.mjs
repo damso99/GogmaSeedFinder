@@ -27,6 +27,8 @@ const files = {
     .replace(/^export /gm, ""),
   wilds: readFileSync(new URL("./ocr-wilds-profile.js", import.meta.url), "utf8")
     .replace(/^export /gm, ""),
+  queue: readFileSync(new URL("./ocr-wilds-queue.js", import.meta.url), "utf8")
+    .replace(/^export /gm, ""),
   ui: readFileSync(new URL("./ocr-ui.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
     .replace(/^export /gm, "")
@@ -37,6 +39,7 @@ function setup(initialText, { savedSnapshots = null } = {}) {
   let frameLevel = 0;
   let minorFlicker = false;
   let wildsVisible = false;
+  let onRecognize = null;
   class Node {
     constructor(id) {
       this.id = id;
@@ -94,7 +97,7 @@ function setup(initialText, { savedSnapshots = null } = {}) {
   }
   const names = [
     "ocr-panel", "ocr-preview", "ocr-mode", "ocr-preprocess", "ocr-auto",
-    "ocr-preview-zoom", "ocr-precision", "ocr-event-mode", "ocr-event-state", "ocr-wilds-profile", "ocr-wilds-status", "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
+    "ocr-preview-zoom", "ocr-precision", "ocr-event-mode", "ocr-event-state", "ocr-wilds-profile", "ocr-wilds-status", "ocr-wilds-progress", "ocr-wilds-history", "ocr-reset-area", "ocr-retry", "ocr-toggle-pause", "ocr-apply-once", "ocr-status",
     "ocr-recognized", "weapon-type", "attribute-force", "artian-search-weapon-type",
     "artian-search-attribute-force",
   ];
@@ -117,6 +120,11 @@ function setup(initialText, { savedSnapshots = null } = {}) {
         setParameters: async () => {},
         recognize: async () => {
           recognitionCount++;
+          if (onRecognize) {
+            const hook = onRecognize;
+            onRecognize = null;
+            hook();
+          }
           const reading = nextReadings.length
             ? nextReadings.shift()
             : { text, confidence: 92 };
@@ -162,6 +170,7 @@ function setup(initialText, { savedSnapshots = null } = {}) {
   vm.runInContext(files.event, context);
   vm.runInContext(files.consensus, context);
   vm.runInContext(files.wilds, context);
+  vm.runInContext(files.queue, context);
   vm.runInContext(files.ui, context);
   const ui = vm.runInContext("initializeOcrUi(document)", context);
   const observed = [];
@@ -180,6 +189,7 @@ function setup(initialText, { savedSnapshots = null } = {}) {
     setFrame(value) { frameLevel = value; },
     setMinorFlicker(value) { minorFlicker = value; },
     setWildsVisible(value) { wildsVisible = value; },
+    onRecognize(fn) { onRecognize = fn; },
     getRecognitionCount: () => recognitionCount,
     getWorkersTerminated: () => workersTerminated,
   };
@@ -547,6 +557,115 @@ test("retry after a recorded Wilds result does not create another row", async ()
   for(let i=0;i<13;i++)s.ui.preview();
   await s.ui.scan();
   assert.equal(s.observed.length,1);
+  s.nodes["ocr-retry"].click();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  s.ui.stop();
+});
+
+
+test("paused Wilds capture remains queued and resumes without missing a roll", async () => {
+  const options="기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup(options);
+  s.video.videoWidth=1920; s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  s.nodes["ocr-toggle-pause"].click();
+  s.setWildsVisible(true);
+  for(let i=0;i<13;i++)s.ui.preview();
+  await s.ui.scan();
+  assert.equal(s.observed.length,0);
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("대기 1"));
+  assert.ok(s.nodes["ocr-wilds-status"].textContent.includes("일시정지"));
+  s.nodes["ocr-toggle-pause"].click();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("완료 1"));
+  assert.ok(s.nodes["ocr-wilds-history"].textContent.includes("입력 완료"));
+  s.ui.stop();
+});
+
+test("OCR interrupted by pause restores its original frozen image batch", async () => {
+  const options="기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup(options);
+  s.video.videoWidth=1920; s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  s.setWildsVisible(true);
+  for(let i=0;i<13;i++)s.ui.preview();
+  s.onRecognize(()=>s.nodes["ocr-toggle-pause"].click());
+  await s.ui.scan();
+  assert.equal(s.observed.length,0);
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("대기 1"));
+  s.nodes["ocr-toggle-pause"].click();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  assert.equal(s.nodes["ocr-wilds-status"].textContent.includes("일시정지"),false);
+  s.ui.stop();
+});
+
+test("failed Wilds OCR is retained for review and can retry the same captured images", async () => {
+  const options="기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup("알 수 없는 옵션");
+  s.video.videoWidth=1920; s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  s.setWildsVisible(true);
+  for(let i=0;i<13;i++)s.ui.preview();
+  await s.ui.scan();
+  assert.equal(s.observed.length,0);
+  assert.ok(s.nodes["ocr-wilds-history"].textContent.includes("확인 필요"));
+  s.setText(options);
+  s.nodes["ocr-retry"].click();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  assert.equal(s.nodes["ocr-wilds-history"].textContent.includes("입력 완료"),true);
+  s.nodes["ocr-retry"].click();
+  await s.ui.scan();
+  assert.equal(s.observed.length,1);
+  s.ui.stop();
+});
+
+
+test("two restoration results captured during pause are processed FIFO after resume", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup(text);
+  s.video.videoWidth=1920;s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  s.nodes["ocr-toggle-pause"].click();
+  for(let event=0;event<2;event++) {
+    s.setWildsVisible(false);
+    for(let n=0;n<5;n++)s.ui.preview();
+    s.setWildsVisible(true);
+    for(let n=0;n<13;n++)s.ui.preview();
+  }
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("대기 2"));
+  await s.ui.scan();
+  assert.equal(s.observed.length,0);
+  s.nodes["ocr-toggle-pause"].click();
+  await s.ui.scan();
+  await s.ui.scan();
+  assert.equal(s.observed.length,2);
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("완료 2"));
+  s.ui.stop();
+});
+
+test("manual confirmation marks the recognized review item as done", async () => {
+  const text = "기초 공격력 강화Ⅱ\n기초 공격력 강화Ⅲ\n회심률 강화Ⅱ\n기초 공격력 강화 EX\n예리도 강화 EX";
+  const s=setup(text);
+  s.video.videoWidth=1920;s.video.videoHeight=1080;
+  s.nodes["ocr-wilds-profile"].checked=true;
+  s.nodes["ocr-wilds-profile"].dispatchEvent({type:"change"});
+  s.nodes["ocr-auto"].checked=false;
+  s.setWildsVisible(true);
+  for(let n=0;n<13;n++)s.ui.preview();
+  await s.ui.scan();
+  assert.equal(s.observed.length,0);
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("확인 필요 1"));
+  s.nodes["ocr-apply-once"].click();
+  assert.equal(s.observed.length,1);
+  assert.ok(s.nodes["ocr-wilds-progress"].textContent.includes("완료 1"));
   s.nodes["ocr-retry"].click();
   await s.ui.scan();
   assert.equal(s.observed.length,1);

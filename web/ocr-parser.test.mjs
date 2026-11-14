@@ -101,3 +101,15 @@ test("a missing middle bonus keeps its original slot for temporal OCR consensus"
   assert.deepEqual(partial.ids, []);
   assert.deepEqual(recognize("gogma", "기초 공격력 강화Ⅱ\n회심률 강화Ⅱ").slotIds, []);
 });
+
+test("five valid lines plus an unrecognized extra cannot become a false seed observation", () => {
+  const lines = [
+    "기초 공격력 강화Ⅱ","기초 공격력 강화Ⅲ","회심률 강화Ⅱ",
+    "기초 공격력 강화 EX","예리도 강화 EX",
+  ];
+  assert.equal(recognize("gogma",lines.join("\n")).complete,true);
+  const extra = recognize("gogma",[...lines,"새로운 화면 안내"].join("\n"));
+  assert.equal(extra.complete,false);
+  assert.deepEqual(extra.ids,[]);
+  assert.deepEqual(extra.slotIds,[]);
+});

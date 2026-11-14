@@ -3640,3 +3640,17 @@ button:disabled {
   font-size: .81rem;
   line-height: 1.55;
 }
+
+.ocr-wilds-progress, .ocr-wilds-history {
+  border: 1px solid var(--line);
+  background: #121913;
+  color: #d8e5d4;
+  border-radius: 9px;
+  padding: 9px 12px;
+  margin: 6px 0;
+  line-height: 1.5;
+  font-size: .79rem;
+  overflow-wrap: anywhere;
+}
+.ocr-wilds-history { white-space: pre-wrap; max-height: 132px; overflow: auto; }
+.ocr-wilds-progress[hidden], .ocr-wilds-history[hidden] { display: none; }
