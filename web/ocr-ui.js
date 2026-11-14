@@ -1221,9 +1221,11 @@ export function initializeOcrUi(doc = document) {
   });
   retryButton?.addEventListener("click", () => {
     session++;
-    if (wildsCheck?.checked && wildsLastBatch
-      && !wildsAppliedIds.has(wildsLastBatch.id)) {
-      wildsTasks.retry(wildsLastBatch.id);
+    if (wildsCheck?.checked) {
+      // Retry the OLDEST unresolved result, not just the newest capture.
+      // Earlier failed rolls must stay recoverable after later rolls succeed.
+      const unresolved = wildsTasks.history().find(item => item.status === "review");
+      if (unresolved) wildsTasks.retry(unresolved.id);
       updateWildsProgress();
     }
     sequencers[modeSelect.value].clearPending();
