@@ -107,7 +107,9 @@ export function parseOcrResult(mode, text) {
   const mapped = lines.map((line) => ({ line, id: matchBonusLine(line, mode) }))
     .filter((result) => result.id !== null);
   const ids = mapped.map(({ id }) => id);
-  const complete = ids.length === 5;
+  // Never accept 5 valid bonuses extracted from a 6+ line OCR block:
+  // the extra line may be a real sixth match or a shifted missing option.
+  const complete = lines.length === 5 && ids.length === 5;
   return {
     mode, complete, recognized: ids.length, lines,
     ids: complete ? ids : [],
